@@ -1,5 +1,5 @@
 // src/courses/student-course.entity.ts
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn } from 'typeorm';
 import { User } from '../users/user.entity';
 import { Course } from './course.entity';
 
@@ -24,4 +24,7 @@ export class StudentCourse {
 
   @Column({ default: false })
   pagado: boolean;
+
+  @CreateDateColumn()
+  createdAt: Date;
 }

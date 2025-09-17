@@ -20,7 +20,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(private readonly coursesService: CoursesService) { }
 
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -105,6 +105,15 @@ export class CoursesController {
   @Get(':id/estudiantes')
   async estudiantesCurso(@Param('id', ParseIntPipe) id: number) {
     return this.coursesService.estudiantesCurso(id);
+  }
+
+
+  // En tu courses.controller.ts
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/estudiantes-con-pagos')
+  async estudiantesCursoConPagos(@Param('id', ParseIntPipe) id: number) {
+    return this.coursesService.estudiantesCursoConPagos(id);
   }
 
   @Roles('ADMIN')

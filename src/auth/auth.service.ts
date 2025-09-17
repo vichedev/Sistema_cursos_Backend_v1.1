@@ -122,27 +122,22 @@ export class AuthService {
   }
 
   async login(data: LoginDto) {
-    console.log('🔐 Intento de login con usuario:', data.usuario);
-
     // Buscar por usuario O correo
     const user = await this.usersService.findByUsuario(data.usuario) ||
       await this.usersService.findByCorreo(data.usuario);
 
     if (!user) {
-      console.log('❌ Usuario no encontrado');
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
-    console.log('👤 Usuario encontrado:', user.usuario);
-    console.log('🔐 Hash en BD:', user.password);
-    console.log('🔑 Contraseña ingresada:', data.password);
+  
 
     // Verificar el hash
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
-    console.log('✅ Contraseña válida:', isPasswordValid);
+
 
     if (!isPasswordValid) {
-      console.log('❌ Contraseña incorrecta');
+      
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 

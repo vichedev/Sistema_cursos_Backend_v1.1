@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Course } from './course.entity';
 import { StudentCourse } from './student-course.entity';
+import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class CoursesService {
   constructor(
     @InjectRepository(Course) private repo: Repository<Course>,
     @InjectRepository(StudentCourse) private studentCourseRepo: Repository<StudentCourse>,
+    @InjectRepository(PaymentAttempt) private paymentAttemptRepo: Repository<PaymentAttempt>,
     private usersService: UsersService,
   ) { }
 
@@ -38,7 +40,7 @@ export class CoursesService {
 
     // Actualizar el curso
     await this.repo.update(id, data);
-    
+
     // Devolver el curso actualizado
     return this.findById(id);
   }
@@ -57,7 +59,7 @@ export class CoursesService {
     const inscritos = await this.studentCourseRepo.find({ where: { estudianteId: userId } });
     const cursosIds = inscritos.map((x) => x.cursoId);
     if (!cursosIds.length) return [];
-    
+
     const cursos = await this.repo.find({
       where: { id: In(cursosIds) },
       relations: ['profesor'],
@@ -89,4 +91,41 @@ export class CoursesService {
       asignatura: curso.profesor ? curso.profesor.asignatura : null,
     }));
   }
+
+  // En tu courses.service.ts
+  async estudiantesCursoConPagos(cursoId: number) {
+    // Obtener las inscripciones con información de pago
+    const inscripciones = await this.studentCourseRepo.find({
+      where: { cursoId },
+      relations: ['estudiante']
+    });
+
+    // Obtener información de pagos desde la tabla de payment_attempts
+    const pagos = await this.paymentAttemptRepo.find({
+      where: {
+        cursoId,
+        status: 'Approved' // Solo pagos aprobados
+      }
+    });
+
+    // Combinar la información
+    const estudiantesConPagos = inscripciones.map(inscripcion => {
+      const pago = pagos.find(p => p.userId === inscripcion.estudianteId);
+
+      return {
+        id: inscripcion.estudiante.id,
+        nombres: inscripcion.estudiante.nombres,
+        apellidos: inscripcion.estudiante.apellidos,
+        correo: inscripcion.estudiante.correo,
+        montoPagado: pago ? Number(pago.amount) : 0,
+        metodoPago: pago ? 'Payphone' : 'Gratis',
+        fechaInscripcion: inscripcion.createdAt
+      };
+    });
+
+    return { estudiantes: estudiantesConPagos };
+  }
+
+
+
 }

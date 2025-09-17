@@ -6,13 +6,14 @@ import { join } from 'path';
 
 import { Course } from './course.entity';
 import { StudentCourse } from './student-course.entity';
+import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { CoursesService } from './courses.service';
 import { CoursesController } from './courses.controller';
 import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Course, StudentCourse]),
+    TypeOrmModule.forFeature([Course, StudentCourse, PaymentAttempt]), // 👈 AQUÍ ESTÁ EL CAMBIO
     UsersModule,
     MulterModule.register({
       storage: diskStorage({
