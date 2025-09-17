@@ -8,11 +8,29 @@ import { join } from 'path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Habilitar CORS para ambos orígenes usados en desarrollo
+  // ✅ CORS sin errores de TypeScript
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'https://moviesplus.xyz'
+  ];
+
+  // Agregar FRONTEND_URL si existe (ngrok dinámico)
+  if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+  }
+
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://localhost:5174'],
+    origin: allowedOrigins,
     credentials: true,
   });
+
+  // ✅ Servir frontend en producción
+  if (process.env.NODE_ENV === 'production') {
+    app.useStaticAssets(join(__dirname, '..', 'public'), {
+      prefix: '/',
+    });
+  }
 
   // Sirve carpeta uploads para imágenes
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
@@ -20,7 +38,6 @@ async function bootstrap() {
   });
 
   await seedAdminUser(app);
-
   await app.listen(process.env.PORT || 3001);
 }
 bootstrap();
