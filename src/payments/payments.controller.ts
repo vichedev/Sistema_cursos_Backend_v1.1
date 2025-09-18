@@ -308,7 +308,7 @@ ${accesoMensaje}
           <br>
           <p><i>¡Nos vemos en el curso!</i></p>
           <hr>
-          <small>Este correo fue generado automáticamente por el sistema de Cursos RNC.</small>
+          <small>Este correo fue generado automáticamente por el sistema de Cursos MAAT.</small>
         </div>
         `
       );
@@ -345,7 +345,7 @@ ${accesoMensaje}
           </div>
           
           <hr>
-          <small>Este correo fue generado automáticamente por el sistema de Cursos RNC.</small>
+          <small>Este correo fue generado automáticamente por el sistema de Cursos MAAT.</small>
         </div>
         `
       );

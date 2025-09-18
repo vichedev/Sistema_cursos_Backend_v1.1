@@ -92,7 +92,7 @@ export class CoursesService {
                 
                 <p style="color: #666; font-size: 14px;">¡No te pierdas esta oportunidad de aprender!</p>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                <small style="color: #999;">Sistema de Cursos RNC</small>
+                <small style="color: #999;">Sistema de Cursos MAAT</small>
               </div>
             `
           );

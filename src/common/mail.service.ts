@@ -20,7 +20,7 @@ export class MailService {
 
   async sendMail(to: string, subject: string, html: string) {
     await this.transporter.sendMail({
-      from: `"Cursos RNC" <${this.config.get('SMTP_USER')}>`,
+      from: `"Cursos MAAT" <${this.config.get('SMTP_USER')}>`,
       to,
       subject,
       html,
@@ -30,10 +30,10 @@ export class MailService {
   // Método para enviar correo de verificación
   async sendVerificationEmail(email: string, token: string, nombre: string) {
     const verificationUrl = `${this.config.get('FRONTEND_URL')}/verify-email?token=${token}`;
-    
+
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #333;">Verificación de correo - Cursos RNC</h2>
+        <h2 style="color: #333;">Verificación de correo - Cursos MAAT</h2>
         <p>Hola ${nombre},</p>
         <p>Gracias por registrarte en nuestra plataforma. Para completar tu registro, por favor verifica tu dirección de correo electrónico haciendo clic en el siguiente botón:</p>
         <div style="text-align: center; margin: 30px 0;">
@@ -49,7 +49,7 @@ export class MailService {
         <p>Si no solicitaste esta verificación, puedes ignorar este correo.</p>
         <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
         <p style="color: #999; font-size: 12px;">
-          Este correo fue enviado automáticamente por el Sistema de Cursos RNC.
+          Este correo fue enviado automáticamente por el Sistema de Cursos MAAT.
         </p>
       </div>
     `;

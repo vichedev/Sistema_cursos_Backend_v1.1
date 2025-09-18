@@ -32,7 +32,6 @@ export class UsersController {
 
   @Get('usuarios-por-rol')
   async getUsuariosPorRol() {
-    // Obtener estudiantes con sus cursos y campos adicionales
     const estudiantes = await this.userRepository
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.studentCourses', 'studentCourse')
@@ -60,7 +59,6 @@ export class UsersController {
         })),
     }));
 
-    // Obtener administradores con todos los campos requeridos
     const administradores = await this.userRepository
       .createQueryBuilder('user')
       .select([
@@ -74,7 +72,7 @@ export class UsersController {
         'user.empresa',
         'user.cargo',
         'user.password',
-        'user.asignatura', // nuevo campo
+        'user.asignatura',
       ])
       .where('user.rol = :rol', { rol: 'ADMIN' })
       .getMany();
@@ -90,16 +88,25 @@ export class UsersController {
       empresa: u.empresa,
       cargo: u.cargo,
       password: u.password,
-      asignatura: u.asignatura,  // enviar asignatura al frontend
+      asignatura: u.asignatura,
     }));
-
 
     return {
       estudiantes: estudiantesFormateados,
       administradores: administradoresFormateados,
     };
   }
-  // crear un admin
+
+  @Post('check-duplicates')
+  async checkDuplicates(@Body() checkData: { 
+    correo?: string; 
+    usuario?: string; 
+    cedula?: string; 
+    celular?: string 
+  }) {
+    return this.usersService.checkDuplicates(checkData);
+  }
+
   @Post()
   async createUser(@Body() userData: Partial<User>) {
     return this.usersService.create(userData);
