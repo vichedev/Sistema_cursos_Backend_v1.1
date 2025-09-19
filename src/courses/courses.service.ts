@@ -23,7 +23,7 @@ export class CoursesService {
   ) { }
 
   // ===============================
-  // CREAR CURSO + Notificación opcional
+  // CREAR CURSO + Notificación en segundo plano
   // ===============================
   async create(data: any) {
     const course = this.repo.create(data);
@@ -48,10 +48,11 @@ export class CoursesService {
     const notificarWhatsapp = data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
 
     if (notificarCorreo || notificarWhatsapp) {
-      const courseWithRelations = await this.findById(courseId);
-      if (courseWithRelations) {
-        await this.notifyAllStudents(courseWithRelations, notificarCorreo, notificarWhatsapp);
-      }
+      // Ejecutar en segundo plano sin await
+      this.notifyAllStudentsBackground(courseId, notificarCorreo, notificarWhatsapp)
+        .catch(err => {
+          this.logger.error(`Error en notificación en segundo plano: ${err.message}`);
+        });
     }
 
     // 🔧 Devolver el curso completo con relaciones
@@ -59,51 +60,93 @@ export class CoursesService {
   }
 
   // ===============================
-  // Notificar a TODOS los estudiantes
+  // Notificar en segundo plano con sistema de colas
   // ===============================
-  private async notifyAllStudents(course: Course, correo: boolean, whatsapp: boolean) {
-    // 🔧 Obtener estudiantes directamente del repo User
-    const estudiantes = await this.userRepo.find({
-      where: { rol: 'ESTUDIANTE' }
-    });
+  private async notifyAllStudentsBackground(courseId: number, correo: boolean, whatsapp: boolean) {
+    try {
+      const course = await this.findById(courseId);
+      if (!course) {
+        this.logger.error(`Curso ${courseId} no encontrado para notificación`);
+        return;
+      }
 
-    this.logger.log(`📢 Notificando a ${estudiantes.length} estudiantes sobre el curso: ${course.titulo}`);
+      // Obtener estudiantes
+      const estudiantes = await this.userRepo.find({
+        where: { rol: 'ESTUDIANTE' }
+      });
 
-    for (const est of estudiantes) {
-      try {
-        // --- Correo
-        if (correo) {
-          await this.mail.sendMail(
-            est.correo,
-            `📚 Nuevo curso disponible: ${course.titulo}`,
-            `
-              <div style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
-                <h3>${course.titulo}</h3>
-                <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
-                
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                  <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
-                  <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
-                  <p><b>👨‍🏫 Profesor:</b> ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'}</p>
-                  <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
-                  <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
-                </div>
-                
-                <p style="color: #666; font-size: 14px;">¡No te pierdas esta oportunidad de aprender!</p>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                <small style="color: #999;">Sistema de Cursos MAAT</small>
-              </div>
-            `
-          );
-          this.logger.log(`📧 Correo enviado a ${est.correo}`);
-        }
+      this.logger.log(`📢 Programando notificaciones para ${estudiantes.length} estudiantes`);
 
-        // --- WhatsApp
-        if (whatsapp && est.celular) {
-          const mensaje = `🎓 *NUEVO CURSO DISPONIBLE*
+      // Dividir en lotes de 10
+      const batchSize = 10;
+      const delayBetweenBatches = 2 * 60 * 1000; // 2 minutos en milisegundos
 
-Hola ${est.nombres} 👋
+      for (let i = 0; i < estudiantes.length; i += batchSize) {
+        const batch = estudiantes.slice(i, i + batchSize);
+        
+        // Programar el envío de este lote con delay incremental
+        setTimeout(async () => {
+          this.logger.log(`⏰ Procesando lote ${i/batchSize + 1} de ${Math.ceil(estudiantes.length/batchSize)}`);
+          
+          for (const est of batch) {
+            try {
+              if (correo) {
+                await this.sendEmailNotification(est, course);
+              }
+              
+              if (whatsapp && est.celular) {
+                await this.sendWhatsAppNotification(est, course);
+              }
+              
+              // Pequeña pausa entre mensajes (0.5 segundos)
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (err) {
+              this.logger.error(`❌ Error notificando a ${est.correo}: ${err.message}`);
+            }
+          }
+        }, i/batchSize * delayBetweenBatches);
+      }
+
+      this.logger.log(`✅ Notificaciones programadas para el curso: ${course.titulo}`);
+    } catch (err) {
+      this.logger.error(`Error en notificación en segundo plano: ${err.message}`);
+    }
+  }
+
+  // ===============================
+  // Métodos auxiliares para notificaciones
+  // ===============================
+  private async sendEmailNotification(student: User, course: Course) {
+    await this.mail.sendMail(
+      student.correo,
+      `📚 Nuevo curso disponible: ${course.titulo}`,
+      `
+        <div style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
+          <h3>${course.titulo}</h3>
+          <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
+          
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
+            <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
+            <p><b>👨‍🏫 Profesor:</b> ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'}</p>
+            <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
+            <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
+          </div>
+          
+          <p style="color: #666; font-size: 14px;">¡No te pierdas esta oportunidad de aprender!</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+          <small style="color: #999;">Sistema de Cursos MAAT</small>
+        </div>
+      `
+    );
+    this.logger.log(`📧 Correo enviado a ${student.correo}`);
+  }
+
+  private async sendWhatsAppNotification(student: User, course: Course) {
+    const mensaje = `🎓 *NUEVO CURSO DISPONIBLE*
+
+Hola ${student.nombres} 👋
 
 Se ha creado un nuevo curso:
 📚 *${course.titulo}*
@@ -118,14 +161,7 @@ Se ha creado un nuevo curso:
 
 ¡No te lo pierdas! 🚀`;
 
-          await this.enviarWhatsapp(est.celular, mensaje);
-        }
-      } catch (err) {
-        this.logger.error(`❌ Error notificando a ${est.correo}: ${err.message}`);
-      }
-    }
-
-    this.logger.log(`✅ Proceso de notificación completado para el curso: ${course.titulo}`);
+    await this.enviarWhatsapp(student.celular, mensaje);
   }
 
   // ===============================
