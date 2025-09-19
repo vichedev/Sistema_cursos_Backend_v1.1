@@ -1,3 +1,4 @@
+// src/courses/courses.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
@@ -7,17 +8,20 @@ import { join } from 'path';
 import { Course } from './course.entity';
 import { StudentCourse } from './student-course.entity';
 import { PaymentAttempt } from '../payments/payment-attempt.entity';
-import { User } from '../users/user.entity'; // 🔧 Agregado para acceso directo a estudiantes
+import { User } from '../users/user.entity';
 import { CoursesService } from './courses.service';
 import { CoursesController } from './courses.controller';
 import { UsersModule } from '../users/users.module';
-import { CommonModule } from '../common/common.module'; // 🔧 Para MailService
+import { CommonModule } from '../common/common.module';
+// ⬇️ IMPORTA el módulo de notificaciones (debe exportar el service)
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Course, StudentCourse, PaymentAttempt, User]), // 🔧 User agregado
+    TypeOrmModule.forFeature([Course, StudentCourse, PaymentAttempt, User]),
     UsersModule,
-    CommonModule, // 🔧 Para acceso a MailService
+    CommonModule,
+    NotificationsModule,                // ⬅️ AQUI EL IMPORT FALTANTE
     MulterModule.register({
       storage: diskStorage({
         destination: join(__dirname, '..', '..', 'uploads'),
@@ -30,6 +34,6 @@ import { CommonModule } from '../common/common.module'; // 🔧 Para MailService
   ],
   providers: [CoursesService],
   controllers: [CoursesController],
-  exports: [CoursesService, TypeOrmModule], // exporta TypeOrmModule para compartir entidades
+  exports: [CoursesService, TypeOrmModule],
 })
 export class CoursesModule {}

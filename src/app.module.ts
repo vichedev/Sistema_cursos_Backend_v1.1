@@ -15,6 +15,9 @@ import { StatsModule } from './stats/stats.module';
 
 import { CommonModule } from './common/common.module'; // <-- agregado
 
+
+import { NotificationsModule } from './notifications/notifications.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -43,6 +46,7 @@ import { CommonModule } from './common/common.module'; // <-- agregado
     CoursesModule,
     PaymentsModule,
     StatsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

@@ -1,3 +1,4 @@
+// src/courses/courses.service.ts
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -9,6 +10,9 @@ import { MailService } from '../common/mail.service';
 import { User } from '../users/user.entity';
 import axios from 'axios';
 
+// ✅ importar el SERVICE SSE (no controller)
+import { NotificationsSseService } from '../notifications/notifications.sse.service';
+
 @Injectable()
 export class CoursesService {
   private readonly logger = new Logger(CoursesService.name);
@@ -19,8 +23,10 @@ export class CoursesService {
     @InjectRepository(PaymentAttempt) private paymentAttemptRepo: Repository<PaymentAttempt>,
     @InjectRepository(User) private userRepo: Repository<User>,
     private usersService: UsersService,
-    private mail: MailService
-  ) { }
+    private mail: MailService,
+    // ✅ inyecta el servicio SSE
+    private readonly sse: NotificationsSseService,
+  ) {}
 
   // ===============================
   // CREAR CURSO + Notificación en segundo plano
@@ -29,9 +35,7 @@ export class CoursesService {
     const course = this.repo.create(data);
     const result = await this.repo.save(course);
 
-    // 🔧 Verificación más explícita del tipo
     let courseId: number;
-
     if (Array.isArray(result)) {
       if (result.length > 0 && result[0].id) {
         courseId = result[0].id;
@@ -48,21 +52,24 @@ export class CoursesService {
     const notificarWhatsapp = data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
 
     if (notificarCorreo || notificarWhatsapp) {
-      // Ejecutar en segundo plano sin await
+      // no esperar
       this.notifyAllStudentsBackground(courseId, notificarCorreo, notificarWhatsapp)
-        .catch(err => {
-          this.logger.error(`Error en notificación en segundo plano: ${err.message}`);
-        });
+        .catch((err) =>
+          this.logger.error(`Error en notificación en segundo plano: ${err.message}`),
+        );
     }
 
-    // 🔧 Devolver el curso completo con relaciones
     return this.findById(courseId);
   }
 
   // ===============================
-  // Notificar en segundo plano con sistema de colas
+  // Notificar en segundo plano con lotes + SSE
   // ===============================
-  private async notifyAllStudentsBackground(courseId: number, correo: boolean, whatsapp: boolean) {
+  private async notifyAllStudentsBackground(
+    courseId: number,
+    correo: boolean,
+    whatsapp: boolean,
+  ) {
     try {
       const course = await this.findById(courseId);
       if (!course) {
@@ -70,44 +77,54 @@ export class CoursesService {
         return;
       }
 
-      // Obtener estudiantes
-      const estudiantes = await this.userRepo.find({
-        where: { rol: 'ESTUDIANTE' }
-      });
+      const estudiantes = await this.userRepo.find({ where: { rol: 'ESTUDIANTE' } });
+      const total = estudiantes.length;
 
-      this.logger.log(`📢 Programando notificaciones para ${estudiantes.length} estudiantes`);
+      // ▶️ START (una tarjeta por curso)
+      this.sse.emitStart(courseId, course.titulo, total);
 
-      // Dividir en lotes de 10
-      const batchSize = 10;
-      const delayBetweenBatches = 2 * 60 * 1000; // 2 minutos en milisegundos
+      this.logger.log(`📢 Programando notificaciones para ${total} estudiantes`);
 
-      for (let i = 0; i < estudiantes.length; i += batchSize) {
-        const batch = estudiantes.slice(i, i + batchSize);
-        
-        // Programar el envío de este lote con delay incremental
-        setTimeout(async () => {
-          this.logger.log(`⏰ Procesando lote ${i/batchSize + 1} de ${Math.ceil(estudiantes.length/batchSize)}`);
-          
-          for (const est of batch) {
-            try {
-              if (correo) {
-                await this.sendEmailNotification(est, course);
-              }
-              
-              if (whatsapp && est.celular) {
-                await this.sendWhatsAppNotification(est, course);
-              }
-              
-              // Pequeña pausa entre mensajes (0.5 segundos)
-              await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (err) {
-              this.logger.error(`❌ Error notificando a ${est.correo}: ${err.message}`);
-            }
-          }
-        }, i/batchSize * delayBetweenBatches);
+      if (total === 0) {
+        this.sse.emitDone(courseId);
+        this.logger.log(`✅ Notificaciones (0) completadas para el curso: ${course.titulo}`);
+        return;
       }
 
-      this.logger.log(`✅ Notificaciones programadas para el curso: ${course.titulo}`);
+      let completed = 0;
+      const batchSize = 10;
+      const delayBetweenBatches = 2 * 60 * 1000; // 2 minutos
+      const totalBatches = Math.ceil(total / batchSize);
+
+      for (let i = 0; i < total; i += batchSize) {
+        const batch = estudiantes.slice(i, i + batchSize);
+        const batchIndex = i / batchSize;
+
+        setTimeout(async () => {
+          this.logger.log(`⏰ Procesando lote ${batchIndex + 1} de ${totalBatches}`);
+
+          for (const est of batch) {
+            try {
+              if (correo) await this.sendEmailNotification(est, course);
+              if (whatsapp && est.celular) await this.sendWhatsAppNotification(est, course);
+            } catch (err) {
+              this.logger.error(`❌ Error notificando a ${est.correo}: ${err.message}`);
+            } finally {
+              completed = Math.min(completed + 1, total);
+              // ▶️ PROGRESS
+              this.sse.emitProgress(courseId, completed, total);
+
+              await new Promise((r) => setTimeout(r, 500));
+
+              if (completed === total) {
+                // ▶️ DONE
+                this.sse.emitDone(courseId);
+                this.logger.log(`✅ Notificaciones completadas para el curso: ${course.titulo}`);
+              }
+            }
+          }
+        }, batchIndex * delayBetweenBatches);
+      }
     } catch (err) {
       this.logger.error(`Error en notificación en segundo plano: ${err.message}`);
     }
@@ -125,20 +142,22 @@ export class CoursesService {
           <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
           <h3>${course.titulo}</h3>
           <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
-          
           <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
             <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
             <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
-            <p><b>👨‍🏫 Profesor:</b> ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'}</p>
+            <p><b>👨‍🏫 Profesor:</b> ${
+              course.profesor
+                ? course.profesor.nombres + ' ' + course.profesor.apellidos
+                : 'Por confirmar'
+            }</p>
             <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
             <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
           </div>
-          
           <p style="color: #666; font-size: 14px;">¡No te pierdas esta oportunidad de aprender!</p>
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
           <small style="color: #999;">Sistema de Cursos MAAT</small>
         </div>
-      `
+      `,
     );
     this.logger.log(`📧 Correo enviado a ${student.correo}`);
   }
@@ -155,7 +174,9 @@ Se ha creado un nuevo curso:
 
 📅 *Fecha:* ${course.fecha || 'Por confirmar'}
 🕐 *Hora:* ${course.hora || 'Por confirmar'}
-👨‍🏫 *Profesor:* ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'}
+👨‍🏫 *Profesor:* ${
+      course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'
+    }
 💰 *Precio:* ${course.precio > 0 ? '$' + course.precio : 'Gratis'}
 📍 *Modalidad:* ${course.tipo.replace('_', ' ')}
 
@@ -181,24 +202,20 @@ Se ha creado un nuevo curso:
 
     const numeroFormateado = celular.replace(/[^0-9]/g, '');
     const url = 'https://app.wbot.ec:443/backend/api/messages/send';
-    const data = {
-      number: numeroFormateado,
-      body: mensaje,
-      saveOnTicket: true,
-      linkPreview: true,
-    };
+    const data = { number: numeroFormateado, body: mensaje, saveOnTicket: true, linkPreview: true };
 
     try {
       await axios.post(url, data, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000, // 10 segundos timeout
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
       });
       this.logger.log(`📱 Mensaje WhatsApp enviado a ${numeroFormateado}`);
     } catch (error) {
-      this.logger.error(`❌ Error enviando WhatsApp a ${numeroFormateado}: ${JSON.stringify(error.response?.data) || error.message}`);
+      this.logger.error(
+        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${
+          JSON.stringify(error.response?.data) || error.message
+        }`,
+      );
     }
   }
 
@@ -208,71 +225,61 @@ Se ha creado un nuevo curso:
   findAll() {
     return this.repo.find({ where: { activo: true }, relations: ['profesor'] });
   }
-
   findById(id: number) {
     return this.repo.findOne({ where: { id }, relations: ['profesor'] });
   }
-
   async updateCupos(courseId: number, nuevoCupo: number) {
     await this.repo.update(courseId, { cupos: nuevoCupo });
   }
-
   async update(id: number, data: Partial<Course>) {
     const course = await this.findById(id);
-    if (!course) {
-      throw new NotFoundException('Curso no encontrado');
-    }
+    if (!course) throw new NotFoundException('Curso no encontrado');
     await this.repo.update(id, data);
     return this.findById(id);
   }
-
   async findUserById(id: number) {
     return this.usersService.findById(id);
   }
-
   async softDeleteCourse(id: number) {
     const result = await this.repo.update(id, { activo: false });
     if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
     return { success: true };
   }
-
   async misCursos(userId: number) {
     const inscritos = await this.studentCourseRepo.find({ where: { estudianteId: userId } });
     const cursosIds = inscritos.map((x) => x.cursoId);
     if (!cursosIds.length) return [];
-
     const cursos = await this.repo.find({
       where: { id: In(cursosIds) },
       relations: ['profesor'],
     });
-
     return cursos.map((curso) => ({
       ...curso,
-      profesorNombre: curso.profesor ? `${curso.profesor.nombres} ${curso.profesor.apellidos}` : null,
+      profesorNombre: curso.profesor
+        ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
+        : null,
       profesorAsignatura: curso.profesor ? curso.profesor.asignatura : null,
     }));
   }
-
   async estudiantesCurso(cursoId: number) {
     const inscripciones = await this.studentCourseRepo.find({ where: { cursoId } });
     const estudianteIds = inscripciones.map((x) => x.estudianteId);
     if (!estudianteIds.length) return [];
     return this.usersService.findByIds(estudianteIds);
   }
-
   async cursosConEstadoInscrito(userId: number) {
     const cursos = await this.repo.find({ where: { activo: true }, relations: ['profesor'] });
     const inscritos = await this.studentCourseRepo.find({ where: { estudianteId: userId } });
     const inscritosIds = inscritos.map((x) => x.cursoId);
-
     return cursos.map((curso) => ({
       ...curso,
       inscrito: inscritosIds.includes(curso.id),
-      profesorNombre: curso.profesor ? `${curso.profesor.nombres} ${curso.profesor.apellidos}` : null,
+      profesorNombre: curso.profesor
+        ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
+        : null,
       asignatura: curso.profesor ? curso.profesor.asignatura : null,
     }));
   }
-
   async estudiantesCursoConPagos(cursoId: number) {
     const inscripciones = await this.studentCourseRepo.find({
       where: { cursoId },
@@ -285,7 +292,6 @@ Se ha creado un nuevo curso:
 
     const estudiantesConPagos = inscripciones.map((inscripcion) => {
       const pago = pagos.find((p) => p.userId === inscripcion.estudianteId);
-
       return {
         id: inscripcion.estudiante.id,
         nombres: inscripcion.estudiante.nombres,
