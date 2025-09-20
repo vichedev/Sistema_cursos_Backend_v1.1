@@ -36,7 +36,15 @@ export class UsersController {
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.studentCourses', 'studentCourse')
       .leftJoinAndSelect('studentCourse.curso', 'curso')
-      .addSelect(['user.ciudad', 'user.empresa', 'user.cargo', 'user.password', 'user.usuario', 'user.rol'])
+      .addSelect([
+        'user.ciudad',
+        'user.empresa',
+        'user.cargo',
+        'user.password',
+        'user.usuario',
+        'user.rol',
+        'user.cedula' // ← AÑADE ESTA LÍNEA
+      ])
       .where('user.rol = :rol', { rol: 'ESTUDIANTE' })
       .getMany();
 
@@ -50,6 +58,7 @@ export class UsersController {
       ciudad: u.ciudad,
       empresa: u.empresa,
       cargo: u.cargo,
+      cedula: u.cedula, // ← Esto ahora tendrá el valor correcto
       password: u.password,
       cursos: (u.studentCourses || [])
         .filter(sc => !!sc.curso)
@@ -73,6 +82,7 @@ export class UsersController {
         'user.cargo',
         'user.password',
         'user.asignatura',
+        'user.cedula',
       ])
       .where('user.rol = :rol', { rol: 'ADMIN' })
       .getMany();
@@ -98,11 +108,11 @@ export class UsersController {
   }
 
   @Post('check-duplicates')
-  async checkDuplicates(@Body() checkData: { 
-    correo?: string; 
-    usuario?: string; 
-    cedula?: string; 
-    celular?: string 
+  async checkDuplicates(@Body() checkData: {
+    correo?: string;
+    usuario?: string;
+    cedula?: string;
+    celular?: string
   }) {
     return this.usersService.checkDuplicates(checkData);
   }
