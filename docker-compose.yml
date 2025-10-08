@@ -39,7 +39,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx-simple.conf:/etc/nginx/nginx.conf
+      - ./nginx-complete.conf:/etc/nginx/nginx.conf
       - ./public:/usr/share/nginx/html
     depends_on:
       - backend
