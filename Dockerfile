@@ -1,10 +1,10 @@
 FROM node:20-alpine
 
-# Usar el mismo UID que el host (normalmente 1000)
-ARG USER_ID=1000
-ARG GROUP_ID=1000
+# Usar UID 1001 y GID 1001 (sin conflictos)
+ARG USER_ID=1001
+ARG GROUP_ID=1001
 
-# Crear usuario con mismo UID que el host
+# Crear usuario con IDs que no existen
 RUN addgroup -g $GROUP_ID -S nodejs && \
     adduser -S nestjs -u $USER_ID -G nodejs
 
