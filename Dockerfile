@@ -1,30 +1,36 @@
-# Stage 1: Build
-FROM node:18-alpine AS builder
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-RUN npm run build
-
-# Stage 2: Production image
+# Dockerfile en Sistema_cursos_Backend_v1-main/
 FROM node:18-alpine
 
+# Crear usuario no-root
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nestjs -u 1001
+
+# Crear directorio de la app
 WORKDIR /app
 
-COPY --from=builder /app/package*.json ./
-RUN npm install --production
+# Copiar archivos de configuración
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/uploads ./uploads
+# Instalar dependencias
+RUN npm ci
 
-# Asegurar permisos correctos para uploads (usuario node)
-RUN chown -R node:node /app/uploads
+# Copiar código fuente
+COPY . .
 
-USER node
+# Compilar la aplicación
+RUN npm run build
 
+# Crear directorios necesarios y asignar permisos
+RUN mkdir -p uploads public && \
+    chown -R nestjs:nodejs /app
+
+# Cambiar al usuario no-root
+USER nestjs
+
+# Exponer puerto
 EXPOSE 3001
 
-CMD ["node", "dist/main.js"]
+# Comando de inicio
+CMD ["npm", "run", "start:prod"]

@@ -1,0 +1,61 @@
+# docker-compose.yml en Sistema_cursos_Backend_v1-main/
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: cursos_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cursos_network
+    restart: unless-stopped
+
+  # Backend NestJS
+  backend:
+    build: .
+    container_name: cursos_backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./public:/app/public
+    depends_on:
+      - postgres
+    networks:
+      - cursos_network
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - NODE_ENV=production
+
+  # Nginx como reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: cursos_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./public:/usr/share/nginx/html
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+    networks:
+      - cursos_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  cursos_network:
+    driver: bridge
