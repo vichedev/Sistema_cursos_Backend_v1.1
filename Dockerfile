@@ -1,8 +1,12 @@
 FROM node:20-alpine
 
-# Crear usuario no-root
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nestjs -u 1001
+# Usar el UID y GID que funcionan
+ARG USER_ID=1001
+ARG GROUP_ID=65533
+
+# Crear usuario con los IDs existentes
+RUN addgroup -g $GROUP_ID -S nodejs && \
+    adduser -S nestjs -u $USER_ID -G nodejs
 
 # Crear directorio de la app
 WORKDIR /app
@@ -21,11 +25,8 @@ COPY . .
 # Compilar la aplicación
 RUN npm run build
 
-# Crear directorios necesarios y asignar permisos CORRECTOS
-RUN mkdir -p uploads public && \
-    chown -R nestjs:nodejs /app && \
-    chmod -R 755 /app/uploads && \
-    chmod 755 /app/public
+# Crear directorios necesarios
+RUN mkdir -p uploads public
 
 # Cambiar al usuario no-root
 USER nestjs
