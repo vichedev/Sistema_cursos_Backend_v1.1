@@ -43,16 +43,15 @@ setup_environment() {
         
         echo -e "${GREEN}✅ $ENV_FILE encontrado - Configurando sistema...${NC}"
         
-        # Marcar sistema como configurado ANTES de instalar
+        # Marcar sistema como configurado
         touch "$CONFIGURED_FILE"
         
-        # Construir con la configuración inicial
+        # Construir con la configuración inicial (EL .env ESTÁ DISPONIBLE)
         echo -e "${YELLOW}🐳 Construyendo servicios con configuración inicial...${NC}"
         docker compose build --build-arg USER_ID=1001 --build-arg GROUP_ID=1001 --no-cache backend
         
-        # Eliminar .env inmediatamente después de usarlo
-        echo -e "${YELLOW}🗑️  Eliminando $ENV_FILE por seguridad...${NC}"
-        rm "$ENV_FILE"
+        # ✅ CORREGIDO: NO eliminar .env aquí todavía
+        # Se eliminará después de verificar que todo funciona
         
     else
         echo -e "${GREEN}✅ Sistema ya configurado - Modo actualización${NC}"
@@ -61,6 +60,18 @@ setup_environment() {
         if [ -f "$ENV_FILE" ]; then
             echo -e "${YELLOW}⚠️  Eliminando $ENV_FILE temporal...${NC}"
             rm "$ENV_FILE"
+        fi
+    fi
+}
+
+# Función para limpiar .env al final (NUEVA FUNCIÓN)
+cleanup_environment() {
+    if ! is_system_configured; then
+        # Solo en primera ejecución, eliminar .env al FINAL
+        if [ -f "$ENV_FILE" ]; then
+            echo -e "${YELLOW}🗑️  Eliminando $ENV_FILE por seguridad...${NC}"
+            rm "$ENV_FILE"
+            echo -e "${GREEN}✅ $ENV_FILE eliminado - Sistema seguro${NC}"
         fi
     fi
 }
@@ -93,7 +104,7 @@ install_or_update_system() {
     # Corregir permisos
     fix_permissions
     
-    # Construir servicios (en actualización usa cache, en instalación no)
+    # Construir servicios
     if is_system_configured; then
         echo -e "${YELLOW}🐳 Actualizando servicios...${NC}"
         docker compose build --no-cache backend
@@ -120,6 +131,9 @@ install_or_update_system() {
     else
         echo -e "${RED}❌ Error en escritura${NC}"
     fi
+    
+    # ✅ CORREGIDO: Limpiar .env al FINAL de todo
+    cleanup_environment
     
     echo -e "${GREEN}"
     if is_system_configured; then
