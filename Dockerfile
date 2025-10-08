@@ -1,8 +1,5 @@
-# Dockerfile corregido
-FROM node:18-alpine
-
-# Instalar dependencias necesarias para crypto
-RUN apk add --no-cache openssl
+# Dockerfile corregido - usar Node.js 20
+FROM node:20-alpine
 
 # Crear usuario no-root
 RUN addgroup -g 1001 -S nodejs
