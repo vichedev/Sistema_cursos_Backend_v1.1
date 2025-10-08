@@ -1,3 +1,4 @@
+// src/courses/course.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { StudentCourse } from './student-course.entity';
 import { User } from '../users/user.entity';
@@ -36,8 +37,12 @@ export class Course {
   @Column({ type: 'time', nullable: true })
   hora: string;
 
-  // Relación ManyToOne hacia User (profesor)
-  @ManyToOne(() => User, (user) => user.cursosDictados, { eager: true, nullable: true })
+  // Relación ManyToOne hacia User (profesor) - AGREGAR onDelete
+  @ManyToOne(() => User, (user) => user.cursosDictados, { 
+    eager: true, 
+    nullable: true,
+    onDelete: 'SET NULL' // ✅ AGREGAR ESTO - Los cursos quedan sin profesor
+  })
   @JoinColumn({ name: 'profesorId' })
   profesor: User;
 

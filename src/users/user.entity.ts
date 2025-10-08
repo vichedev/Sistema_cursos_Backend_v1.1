@@ -56,6 +56,10 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   emailVerificationSentAt?: Date | null;
 
+  // ✅ NUEVO CAMPO PARA SOFT DELETE
+  @Column({ default: true })
+  activo: boolean;
+
   @OneToMany(() => StudentCourse, (studentCourse) => studentCourse.estudiante)
   studentCourses: StudentCourse[];
 

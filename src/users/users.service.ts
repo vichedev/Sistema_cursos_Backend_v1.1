@@ -98,29 +98,35 @@ export class UsersService {
       }
     }
 
-    // Validar duplicados si se están actualizando estos campos
-    if (data.correo) {
+    // Obtener el usuario actual para comparar
+    const currentUser = await this.findById(id);
+    if (!currentUser) {
+      throw new BadRequestException('Usuario no encontrado');
+    }
+
+    // Validar duplicados solo si los campos cambian
+    if (data.correo && data.correo !== currentUser.correo) {
       const existing = await this.findByCorreo(data.correo);
       if (existing && existing.id !== id) {
         throw new BadRequestException('El correo electrónico ya está registrado por otro usuario');
       }
     }
 
-    if (data.usuario) {
+    if (data.usuario && data.usuario !== currentUser.usuario) {
       const existing = await this.findByUsuario(data.usuario);
       if (existing && existing.id !== id) {
         throw new BadRequestException('El nombre de usuario ya está en uso por otro usuario');
       }
     }
 
-    if (data.cedula) {
+    if (data.cedula && data.cedula !== currentUser.cedula) {
       const existing = await this.findByCedula(data.cedula);
       if (existing && existing.id !== id) {
         throw new BadRequestException('La cédula ya está registrada por otro usuario');
       }
     }
 
-    if (data.celular) {
+    if (data.celular && data.celular !== currentUser.celular) {
       const existing = await this.findByCelular(data.celular);
       if (existing && existing.id !== id) {
         throw new BadRequestException('El número de celular ya está registrado por otro usuario');

@@ -8,14 +8,20 @@ export class StudentCourse {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, user => user.studentCourses, { eager: true })
+  @ManyToOne(() => User, user => user.studentCourses, { 
+    eager: true,
+    onDelete: 'CASCADE' // ✅ SOLO ESTA LÍNEA NUEVA
+  })
   @JoinColumn({ name: 'estudianteId' })
   estudiante: User;
 
   @Column()
   estudianteId: number;
 
-  @ManyToOne(() => Course, course => course.studentCourses, { eager: true })
+  @ManyToOne(() => Course, course => course.studentCourses, { 
+    eager: true,
+    onDelete: 'CASCADE' // ✅ SOLO ESTA LÍNEA NUEVA  
+  })
   @JoinColumn({ name: 'cursoId' })
   curso: Course;
 
