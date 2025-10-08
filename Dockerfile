@@ -1,5 +1,8 @@
-# Dockerfile en Sistema_cursos_Backend_v1-main/
+# Dockerfile corregido
 FROM node:18-alpine
+
+# Instalar dependencias necesarias para crypto
+RUN apk add --no-cache openssl
 
 # Crear usuario no-root
 RUN addgroup -g 1001 -S nodejs
