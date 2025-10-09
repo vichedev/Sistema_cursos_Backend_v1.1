@@ -148,7 +148,8 @@ install_or_update_system() {
     read -p "Presiona Enter para continuar..."
 }
 
-# Función para actualizar desde Git
+
+# Función para actualizar desde Git y reinstalar
 update_from_git() {
     show_header
     echo -e "${BLUE}📥 ACTUALIZACIÓN DESDE GIT${NC}"
@@ -167,8 +168,8 @@ update_from_git() {
         echo -e "${GREEN}✅ Código actualizado desde Git${NC}"
         echo -e "${YELLOW}🔄 Reiniciando servicios con los nuevos cambios...${NC}"
         
-        # Reinstalar con los nuevos cambios
-        docker compose down
+        # ✅ CORREGIDO: NO usar -v para preservar la BD
+        docker compose down                    # ← SIN -v
         docker compose build --no-cache backend
         docker compose up -d
         
@@ -208,18 +209,22 @@ reset_system() {
     echo -e "${RED}⚠️  RESETEO DEL SISTEMA${NC}"
     echo "=========================================="
     echo "ESTA ACCIÓN ELIMINARÁ TODA LA CONFIGURACIÓN"
-    echo "Y REQUERIRÁ UN .env NUEVO PARA REINSTALAR"
+    echo "PERO PRESERVARÁ LA BASE DE DATOS"
+    echo ""
+    echo "Opción destructiva (elimina BD también):"
+    echo "  docker compose down -v"
     echo ""
     read -p "¿Estás seguro? (escribe 'reset' para confirmar): " confirmation
     
     if [ "$confirmation" = "reset" ]; then
         echo -e "${YELLOW}🗑️  Eliminando configuración...${NC}"
-        docker compose down -v
+        # ✅ Preservar BD por defecto
+        docker compose down
         rm -f "$CONFIGURED_FILE"
         rm -f "$ENV_FILE"
         sudo rm -rf uploads/*
 
-        echo -e "${GREEN}✅ Sistema reseteado - Listo para nueva instalación${NC}"
+        echo -e "${GREEN}✅ Sistema reseteado - BD preservada${NC}"
         echo "Ahora necesitarás un archivo .env para reinstalar"
     else
         echo -e "${YELLOW}❌ Reset cancelado${NC}"
