@@ -114,7 +114,14 @@ export class PaymentsController {
         {
           cursoId: body.cursoId,
           userId: body.userId,
-          cursoTitulo: course.titulo
+          cursoTitulo: course.titulo,
+          // ✅ AGREGAR DATOS DEL USUARIO PARA CAMPOS OPCIONALES
+          userData: {
+            nombres: usuario.nombres,
+            apellidos: usuario.apellidos,
+            celular: usuario.celular,
+            email: usuario.correo
+          }
         }
       );
 
@@ -168,12 +175,46 @@ export class PaymentsController {
         return res.redirect(`${frontendUrl}/pago-fallido?error=pago_no_encontrado`);
       }
 
+      // ✅ === MEJORA 1: DETECCIÓN DE REVERSO AUTOMÁTICO ===
+      const tiempoTranscurrido = Date.now() - paymentAttempt.createdAt.getTime();
+      const cincoMinutosEnMs = 5 * 60 * 1000;
+
+      if (tiempoTranscurrido > cincoMinutosEnMs) {
+        this.logger.warn(`⏰ DETECTADO: Posible reverso automático de Payphone`);
+        this.logger.warn(`   Tiempo transcurrido: ${Math.round(tiempoTranscurrido / 1000)} segundos`);
+
+        // Solo registrar - Payphone YA reversó el dinero automáticamente
+        await this.paymentAttemptRepo.update(paymentAttempt.id, {
+          status: 'REVERSADO_AUTOMATICO',
+          callbackData: JSON.stringify({
+            motivo: 'Payphone reversó automáticamente (timeout >5min)',
+            tiempoTranscurridoSeg: Math.round(tiempoTranscurrido / 1000),
+            nota: 'El dinero fue devuelto al cliente por Payphone Business'
+          })
+        });
+
+        return res.redirect(`${frontendUrl}/pago-fallido?error=timeout_reverso&clientTransactionId=${clientTransactionId}`);
+      }
+      // ✅ === FIN MEJORA 1 ===
+
       // Confirmar transacción con Payphone usando API oficial
       this.logger.log(`🔐 Realizando confirmación oficial con Payphone...`);
       const confirmacionData = await this.payphoneService.confirmTransaction(id, clientTransactionId);
 
       const estadoReal = confirmacionData.transactionStatus;
       this.logger.log(`✅ Estado real desde confirmación: ${estadoReal}`);
+
+      // ✅ === MEJORA 2: MEJOR LOGGING ===
+      this.logger.log(`📊 DETALLES DE TRANSACCIÓN:`, {
+        transactionId: confirmacionData.transactionId,
+        authorizationCode: confirmacionData.authorizationCode,
+        cardBrand: confirmacionData.cardBrand,
+        lastDigits: confirmacionData.lastDigits,
+        amount: confirmacionData.amount,
+        date: confirmacionData.date,
+        tiempoProcesoSeg: Math.round(tiempoTranscurrido / 1000)
+      });
+      // ✅ === FIN MEJORA 2 ===
 
       // Actualizar PaymentAttempt con datos completos
       await this.paymentAttemptRepo.update(paymentAttempt.id, {
@@ -457,6 +498,40 @@ ${accesoMensaje}
         callbackData: paymentAttempt.callbackData ? JSON.parse(paymentAttempt.callbackData) : null
       };
     } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Limpieza de pagos expirados
+  @Post('cleanup-expired-payments')
+  async cleanupExpiredPayments() {
+    try {
+      const cincoMinutosAtras = new Date(Date.now() - (5 * 60 * 1000));
+
+      const expiredPayments = await this.paymentAttemptRepo
+        .createQueryBuilder('payment')
+        .where('payment.status = :status', { status: 'PENDIENTE' })
+        .andWhere('payment.createdAt < :date', { date: cincoMinutosAtras })
+        .getMany();
+
+      for (const payment of expiredPayments) {
+        await this.paymentAttemptRepo.update(payment.id, {
+          status: 'EXPIRADO',
+          callbackData: JSON.stringify({
+            motivo: 'Expirado por inactividad (>5min)',
+            expiradoEl: new Date().toISOString()
+          })
+        });
+      }
+
+      this.logger.log(`🧹 Limpieza completada: ${expiredPayments.length} transacciones expiradas`);
+      return {
+        success: true,
+        cleaned: expiredPayments.length
+      };
+
+    } catch (error) {
+      this.logger.error('💥 Error en limpieza de transacciones:', error);
       return { success: false, error: error.message };
     }
   }

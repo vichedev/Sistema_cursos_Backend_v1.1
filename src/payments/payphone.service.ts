@@ -105,7 +105,7 @@ export class PayphoneService implements OnModuleInit {
       currency: "USD",
       responseUrl: responseUrl, // URL donde Payphone redirige después del pago
       cancellationUrl: cancellationUrl,
-      reference: "Inscripción Curso",
+      reference: "Inscripción a Cursos de MAAT ACADEMY",
       // Campos opcionales según la documentación
       phoneNumber: null,
       email: null,
