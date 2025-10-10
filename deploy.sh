@@ -6,11 +6,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuración
 ENV_FILE=".env"
 CONFIGURED_FILE=".system-configured"
+BACKUP_DIR="backups"
 
 # Función para mostrar header
 show_header() {
@@ -74,6 +77,121 @@ cleanup_environment() {
             echo -e "${GREEN}✅ $ENV_FILE eliminado - Sistema seguro${NC}"
         fi
     fi
+}
+
+# ✅ FUNCIÓN NUEVA: Liberar espacio SEGURO (sin afectar BD)
+free_space_safe() {
+    show_header
+    echo -e "${PURPLE}🔧 LIBERANDO ESPACIO SEGURO${NC}"
+    echo "=========================================="
+    echo -e "${YELLOW}⚠️  Esta acción limpiará solo elementos innecesarios${NC}"
+    echo -e "${GREEN}✅ BASE DE DATOS PRESERVADA${NC}"
+    echo ""
+    
+    # Mostrar espacio actual
+    echo -e "${CYAN}📊 Espacio actual utilizado por Docker:${NC}"
+    docker system df
+    
+    echo ""
+    read -p "¿Continuar con la limpieza segura? (s/n): " confirm
+    
+    if [[ $confirm != "s" && $confirm != "S" ]]; then
+        echo -e "${YELLOW}❌ Limpieza cancelada${NC}"
+        read -p "Presiona Enter para volver al menú..."
+        return
+    fi
+    
+    echo -e "${YELLOW}🧹 Iniciando limpieza segura...${NC}"
+    
+    # 1. Limpiar contenedores detenidos (SEGURO)
+    echo -e "${YELLOW}📦 Limpiando contenedores detenidos...${NC}"
+    docker container prune -f
+    echo -e "${GREEN}✅ Contenedores detenidos eliminados${NC}"
+    
+    # 2. Limpiar imágenes dangling (SEGURO - solo imágenes sin tag)
+    echo -e "${YELLOW}🖼️  Limpiando imágenes huérfanas...${NC}"
+    docker image prune -f
+    echo -e "${GREEN}✅ Imágenes huérfanas eliminadas${NC}"
+    
+    # 3. Limpiar redes no utilizadas (SEGURO)
+    echo -e "${YELLOW}🌐 Limpiando redes no utilizadas...${NC}"
+    docker network prune -f
+    echo -e "${GREEN}✅ Redes no utilizadas eliminadas${NC}"
+    
+    # 4. Limpiar cache de build (SEGURO)
+    echo -e "${YELLOW}🏗️  Limpiando cache de construcción...${NC}"
+    docker builder prune -f
+    echo -e "${GREEN}✅ Cache de construcción eliminado${NC}"
+    
+    # 5. Limpiar logs grandes (SEGURO)
+    echo -e "${YELLOW}📝 Limpiando logs antiguos...${NC}"
+    find /var/lib/docker/containers/ -name "*.log" -type f -size +100M -delete 2>/dev/null || true
+    echo -e "${GREEN}✅ Logs grandes eliminados${NC}"
+    
+    # 6. Limpiar cache de npm en contenedores (SEGURO)
+    echo -e "${YELLOW}📦 Limpiando cache de npm...${NC}"
+    docker exec cursos_backend npm cache clean --force 2>/dev/null || true
+    echo -e "${GREEN}✅ Cache de npm limpiado${NC}"
+    
+    # Mostrar espacio liberado
+    echo ""
+    echo -e "${CYAN}📊 Espacio después de la limpieza:${NC}"
+    docker system df
+    
+    echo ""
+    echo -e "${GREEN}🎉 ¡Limpieza segura completada!${NC}"
+    echo -e "${GREEN}✅ Base de datos preservada correctamente${NC}"
+    
+    read -p "Presiona Enter para volver al menú..."
+}
+
+# ✅ FUNCIÓN NUEVA: Respaldar Base de Datos
+backup_database() {
+    show_header
+    echo -e "${CYAN}💾 RESPALDO DE BASE DE DATOS${NC}"
+    echo "=========================================="
+    
+    # Verificar que el contenedor de postgres esté corriendo
+    if ! docker ps | grep -q cursos_postgres; then
+        echo -e "${RED}❌ ERROR: El contenedor 'cursos_postgres' no está corriendo${NC}"
+        read -p "Presiona Enter para volver al menú..."
+        return 1
+    fi
+    
+    # Crear directorio de backups si no existe
+    mkdir -p "$BACKUP_DIR"
+    
+    # Generar nombre de archivo con fecha
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    BACKUP_FILE="$BACKUP_DIR/backup_${TIMESTAMP}.sql"
+    
+    echo -e "${YELLOW}📦 Creando respaldo: $BACKUP_FILE${NC}"
+    
+    # Ejecutar pg_dump dentro del contenedor
+    if docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$BACKUP_FILE"; then
+        # Comprimir el backup
+        gzip "$BACKUP_FILE"
+        BACKUP_FILE_GZ="${BACKUP_FILE}.gz"
+        
+        # Mostrar información del backup
+        FILE_SIZE=$(du -h "$BACKUP_FILE_GZ" | cut -f1)
+        echo -e "${GREEN}✅ Respaldo creado exitosamente!${NC}"
+        echo -e "${GREEN}📁 Archivo: $BACKUP_FILE_GZ${NC}"
+        echo -e "${GREEN}📏 Tamaño: $FILE_SIZE${NC}"
+        echo -e "${GREEN}🕐 Fecha: $(date)${NC}"
+        
+        # Listar últimos backups
+        echo ""
+        echo -e "${CYAN}📋 Últimos respaldos disponibles:${NC}"
+        ls -laht "$BACKUP_DIR"/*.sql.gz 2>/dev/null | head -5 || echo "No hay respaldos anteriores"
+        
+    else
+        echo -e "${RED}❌ Error al crear el respaldo${NC}"
+        # Limpiar archivo en caso de error
+        rm -f "$BACKUP_FILE"
+    fi
+    
+    read -p "Presiona Enter para volver al menú..."
 }
 
 # ✅ FUNCIÓN CORREGIDA - Con pausas y mejor feedback
@@ -207,7 +325,6 @@ install_or_update_system() {
     read -p "Presiona Enter para continuar..."
 }
 
-
 # Función para actualizar desde Git y reinstalar
 update_from_git() {
     show_header
@@ -259,6 +376,16 @@ show_status() {
     echo "🌐 Frontend: https://moviesplus.xyz"
     echo "🔧 Backend API: https://moviesplus.xyz/api"
     
+    # Mostrar espacio de Docker
+    echo -e "${YELLOW}💾 Espacio Docker:${NC}"
+    docker system df
+    
+    # Mostrar últimos backups
+    if [ -d "$BACKUP_DIR" ]; then
+        echo -e "${YELLOW}💾 Últimos respaldos:${NC}"
+        ls -laht "$BACKUP_DIR"/*.sql.gz 2>/dev/null | head -3 || echo "No hay respaldos"
+    fi
+    
     read -p "Presiona Enter para continuar..."
 }
 
@@ -305,11 +432,13 @@ main_menu() {
         echo "5. 📊 Ver Estado"
         echo "6. 🔧 Corregir Permisos"
         echo "7. 📝 Ver Logs"
-        echo "8. 🗑️  Resetear Sistema (cuidado!)"
-        echo "9. ❌ Salir"
+        echo "8. 🧹 Liberar Espacio Seguro"
+        echo "9. 💾 Respaldar Base de Datos"
+        echo "10. 🗑️  Resetear Sistema (cuidado!)"
+        echo "11. ❌ Salir"
         echo "=========================================="
         
-        read -p "Selecciona una opción (1-9): " choice
+        read -p "Selecciona una opción (1-11): " choice
         
         case $choice in
             1) install_or_update_system ;;
@@ -322,8 +451,10 @@ main_menu() {
                 echo -e "${YELLOW}📝 Mostrando logs (Ctrl+C para salir)...${NC}"
                 docker compose logs -f 
                 ;;
-            8) reset_system ;;
-            9) 
+            8) free_space_safe ;;
+            9) backup_database ;;
+            10) reset_system ;;
+            11) 
                 echo -e "${GREEN}👋 ¡Hasta pronto!${NC}"
                 exit 0
                 ;;
