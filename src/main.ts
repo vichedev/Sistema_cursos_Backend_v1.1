@@ -128,6 +128,10 @@ async function bootstrap() {
     logger.log(`📧 SMTP: ${process.env.SMTP_HOST ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
     logger.log(`💳 Payphone: ${process.env.PAYPHONE_API_URL ? 'INTEGRADO' : 'NO CONFIGURADO'}`);
     logger.log(`📱 WhatsApp: ${process.env.WHATSAPP_API_TOKEN ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
+    
+    // ✅ NUEVO LOG: IA CARGADA CON ÉXITO
+    logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅ - Generación de descripciones activa' : 'NO CONFIGURADA'}`);
+    
     logger.log(`🌍 CORS: ${allowedOrigins.length} dominios permitidos`);
     logger.log('='.repeat(60));
     logger.log('📚 Endpoints principales:');
@@ -136,6 +140,10 @@ async function bootstrap() {
     logger.log(`   📊 Cursos:   ${backendUrl || `http://localhost:${port}`}/api/courses`);
     logger.log(`   💳 Pagos:    ${backendUrl || `http://localhost:${port}`}/api/payments`);
     logger.log(`   🖼️  Uploads:  ${backendUrl || `http://localhost:${port}`}/api/uploads`);
+    
+    // ✅ NUEVO LOG: Endpoint de IA
+    logger.log(`   🤖 IA:       ${backendUrl || `http://localhost:${port}`}/api/courses/api/generate-description`);
+    
     logger.log('='.repeat(60));
 
   } catch (error) {

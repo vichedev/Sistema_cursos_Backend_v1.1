@@ -11,17 +11,55 @@ import {
   Delete,
   Put,
   ParseIntPipe,
+  Query, // ✅ Agregar este import
+  BadRequestException, // ✅ Agregar este import
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AIService } from '../common/ai.service'; // ✅ Agregar este import
 
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) { }
+  constructor(
+    private readonly coursesService: CoursesService,
+    private readonly aiService: AIService, // ✅ Agregar esta inyección
+  ) { }
 
+  // ✅ AGREGAR ESTE NUEVO ENDPOINT (antes del primer método existente)
+  @Get('api/generate-description')
+  @UseGuards(JwtAuthGuard)
+  async generateDescription(@Query('titulo') titulo: string) {
+    try {
+      if (!titulo || titulo.trim().length < 3) {
+        throw new BadRequestException('El título debe tener al menos 3 caracteres');
+      }
+
+      if (titulo.length > 100) {
+        throw new BadRequestException('El título es demasiado largo (máximo 100 caracteres)');
+      }
+
+      const description = await this.aiService.generateCourseDescription(titulo.trim());
+      
+      return {
+        success: true,
+        data: {
+          descripcion: description,
+          titulo: titulo
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        message: 'No se pudo generar la descripción automática'
+      };
+    }
+  }
+
+  // EL RESTO DE TU CÓDIGO EXISTente SE MANTIENE IGUAL...
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('create')
@@ -50,6 +88,7 @@ export class CoursesController {
     });
   }
 
+  // ... EL RESTO DE TUS MÉTODOS EXISTENTES SE MANTIENEN EXACTAMENTE IGUAL
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Put(':id')
@@ -106,7 +145,6 @@ export class CoursesController {
   async estudiantesCurso(@Param('id', ParseIntPipe) id: number) {
     return this.coursesService.estudiantesCurso(id);
   }
-
 
   // En tu courses.controller.ts
   @Roles('ADMIN')
