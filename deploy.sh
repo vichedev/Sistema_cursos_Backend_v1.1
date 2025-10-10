@@ -77,14 +77,59 @@ cleanup_environment() {
 }
 
 # Función para corregir permisos
+# ✅ FUNCIÓN CORREGIDA - Usa el nombre del servicio correcto
 fix_permissions() {
     echo -e "${YELLOW}🔧 Configurando permisos...${NC}"
     
+    # 1. Configurar permisos en el HOST
     mkdir -p uploads public
     sudo chown -R 1001:1001 uploads/ 2>/dev/null || true
     sudo chmod -R 755 uploads/ 2>/dev/null || true
     
-    echo -e "${GREEN}✅ Permisos configurados${NC}"
+    echo -e "${GREEN}✅ Permisos en HOST configurados${NC}"
+    
+    # 2. Configurar permisos en el CONTENEDOR
+    echo -e "${YELLOW}🐳 Configurando permisos en el contenedor...${NC}"
+    
+    # ✅ CORREGIDO: Usar el nombre correcto del servicio
+    if docker compose exec -T backend sh -c "
+        mkdir -p /app/uploads && \
+        chown -R node:node /app/uploads && \
+        chmod -R 755 /app/uploads && \
+        echo '✅ Permisos en contenedor configurados'
+    " 2>/dev/null; then
+        echo -e "${GREEN}✅ Permisos en CONTENEDOR configurados${NC}"
+    else
+        echo -e "${RED}❌ Error accediendo al contenedor 'backend'${NC}"
+        echo -e "${YELLOW}💡 Probando con nombre completo 'cursos_backend'...${NC}"
+        
+        # ✅ ALTERNATIVA: Usar docker exec directo
+        if docker exec cursos_backend sh -c "
+            mkdir -p /app/uploads && \
+            chown -R node:node /app/uploads && \
+            chmod -R 755 /app/uploads && \
+            echo '✅ Permisos en contenedor configurados'
+        " 2>/dev/null; then
+            echo -e "${GREEN}✅ Permisos en CONTENEDOR configurados (vía docker exec)${NC}"
+        else
+            echo -e "${RED}❌ No se pudo acceder al contenedor${NC}"
+        fi
+    fi
+    
+    # 3. Verificar que funciona
+    echo -e "${YELLOW}🔍 Verificando permisos...${NC}"
+    
+    # Probar con docker compose primero
+    if docker compose exec -T backend sh -c "touch /app/uploads/test-$(date +%s).txt" 2>/dev/null; then
+        echo -e "${GREEN}✅ Escritura en /app/uploads/: OK (docker compose)${NC}"
+    # Si falla, probar con docker exec directo
+    elif docker exec cursos_backend sh -c "touch /app/uploads/test-$(date +%s).txt" 2>/dev/null; then
+        echo -e "${GREEN}✅ Escritura en /app/uploads/: OK (docker exec)${NC}"
+    else
+        echo -e "${RED}❌ Error: No se puede escribir en /app/uploads/${NC}"
+        echo -e "${YELLOW}💡 Verificando estado del contenedor...${NC}"
+        docker ps | grep backend
+    fi
 }
 
 # Función principal de instalación/actualización
