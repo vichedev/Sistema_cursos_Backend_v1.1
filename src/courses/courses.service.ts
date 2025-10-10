@@ -173,34 +173,48 @@ export class CoursesService {
   // Métodos auxiliares para notificaciones
   // ===============================
   private async sendEmailNotification(student: User, course: Course) {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
+
     await this.mail.sendMail(
       student.correo,
       `📚 Nuevo curso disponible: ${course.titulo}`,
       `
-        <div style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
-          <h3>${course.titulo}</h3>
-          <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
-          <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
-            <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
-            <p><b>👨‍🏫 Profesor:</b> ${course.profesor
+      <div style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
+        <h3>${course.titulo}</h3>
+        <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
+          <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
+          <p><b>👨‍🏫 Profesor:</b> ${course.profesor
         ? course.profesor.nombres + ' ' + course.profesor.apellidos
         : 'Por confirmar'
       }</p>
-            <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
-            <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
-          </div>
-          <p style="color: #666; font-size: 14px;">¡No te pierdas esta oportunidad de aprender!</p>
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <small style="color: #999;">Sistema de Cursos MAAT</small>
+          <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
+          <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
         </div>
-      `,
+        <div style="text-align: center; margin: 25px 0;">
+          <a href="${frontendUrl}" 
+             style="background: #ff6b35; color: white; padding: 12px 30px; 
+                    text-decoration: none; border-radius: 6px; font-weight: bold;
+                    display: inline-block; font-size: 16px;">
+            🚀 Ingresar al Sistema
+          </a>
+        </div>
+        <p style="text-align: center; color: #666; font-size: 14px;">
+          <b>Enlace de acceso:</b> ${frontendUrl}
+        </p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        <small style="color: #999;">Sistema de Cursos MAAT</small>
+      </div>
+    `,
     );
     this.logger.log(`📧 Correo enviado a ${student.correo}`);
   }
 
   private async sendWhatsAppNotification(student: User, course: Course) {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
+
     const mensaje = `🎓 *NUEVO CURSO DISPONIBLE*
 
 Hola ${student.nombres} 👋
@@ -212,10 +226,12 @@ Se ha creado un nuevo curso:
 
 📅 *Fecha:* ${course.fecha || 'Por confirmar'}
 🕐 *Hora:* ${course.hora || 'Por confirmar'}
-👨‍🏫 *Profesor:* ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'
-      }
+👨‍🏫 *Profesor:* ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'}
 💰 *Precio:* ${course.precio > 0 ? '$' + course.precio : 'Gratis'}
 📍 *Modalidad:* ${course.tipo.replace('_', ' ')}
+
+🌐 *Accede al sistema aquí:*
+${frontendUrl}
 
 ¡No te lo pierdas! 🚀`;
 

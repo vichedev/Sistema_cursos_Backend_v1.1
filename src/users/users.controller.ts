@@ -37,7 +37,7 @@ export class UsersController {
 
   @Get('usuarios-por-rol')
   async getUsuariosPorRol() {
-    // MANTENIENDO TU CÓDIGO EXISTENTE
+    // ✅ VERSIÓN CORREGIDA - SOLO CEDULA VISIBLE
     const estudiantes = await this.userRepository
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.studentCourses', 'studentCourse')
@@ -46,10 +46,8 @@ export class UsersController {
         'user.ciudad',
         'user.empresa',
         'user.cargo',
-        'user.password',
-        'user.usuario',
-        'user.rol',
-        'user.cedula'
+        'user.cedula'  // ✅ MANTENER CÉDULA
+        // ❌ ELIMINAR: password, usuario
       ])
       .where('user.rol = :rol', { rol: 'ESTUDIANTE' })
       .getMany();
@@ -59,13 +57,12 @@ export class UsersController {
       nombres: u.nombres,
       apellidos: u.apellidos,
       correo: u.correo,
-      usuario: u.usuario,
+      cedula: u.cedula,  // ✅ MANTENER CÉDULA
       rol: u.rol,
       ciudad: u.ciudad,
       empresa: u.empresa,
       cargo: u.cargo,
-      cedula: u.cedula,
-      password: u.password,
+      // ❌ ELIMINAR: password, usuario
       cursos: (u.studentCourses || [])
         .filter(sc => !!sc.curso)
         .map(sc => ({
@@ -81,14 +78,13 @@ export class UsersController {
         'user.nombres',
         'user.apellidos',
         'user.correo',
-        'user.usuario',
+        'user.cedula',  // ✅ MANTENER CÉDULA
         'user.rol',
         'user.ciudad',
         'user.empresa',
         'user.cargo',
-        'user.password',
         'user.asignatura',
-        'user.cedula',
+        // ❌ ELIMINAR: password, usuario
       ])
       .where('user.rol = :rol', { rol: 'ADMIN' })
       .getMany();
@@ -98,13 +94,13 @@ export class UsersController {
       nombres: u.nombres,
       apellidos: u.apellidos,
       correo: u.correo,
-      usuario: u.usuario,
+      cedula: u.cedula,  // ✅ MANTENER CÉDULA
       rol: u.rol,
       ciudad: u.ciudad,
       empresa: u.empresa,
       cargo: u.cargo,
-      password: u.password,
       asignatura: u.asignatura,
+      // ❌ ELIMINAR: password, usuario
     }));
 
     return {
