@@ -1,5 +1,9 @@
 FROM node:20-alpine
 
+# Instalar tzdata y configurar zona horaria
+RUN apk add --no-cache tzdata
+ENV TZ=America/Guayaquil
+
 # Usar UID 1001 y GID 1001 (sin conflictos)
 ARG USER_ID=1001
 ARG GROUP_ID=1001

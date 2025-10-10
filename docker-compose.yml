@@ -6,6 +6,7 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
+      TZ: America/Guayaquil  # ← Agregar esta línea
     ports:
       - "5432:5432"
     volumes:
@@ -30,6 +31,7 @@ services:
     environment:
       - DB_HOST=postgres
       - NODE_ENV=production
+      - TZ=America/Guayaquil  # ← Agregar esta línea
 
   nginx:
     image: nginx:alpine
@@ -44,6 +46,8 @@ services:
     networks:
       - cursos_network
     restart: unless-stopped
+    environment:
+      - TZ=America/Guayaquil  # ← Agregar esta línea
 
 volumes:
   postgres_data:
