@@ -264,7 +264,7 @@ fix_permissions() {
     read -p "Presiona Enter para volver al menú..."
 }
 
-# Función principal de instalación/actualización
+# Función principal de instalación/actualización CORREGIDA
 install_or_update_system() {
     show_header
     
@@ -278,10 +278,7 @@ install_or_update_system() {
     # Gestión del entorno
     setup_environment
     
-    # Corregir permisos
-    fix_permissions
-    
-    # Construir servicios
+    # ✅ PRIMERO: Construir servicios
     if is_system_configured; then
         echo -e "${YELLOW}🐳 Actualizando servicios...${NC}"
         docker compose build --no-cache backend
@@ -290,12 +287,16 @@ install_or_update_system() {
         docker compose build --no-cache backend
     fi
     
-    # Levantar servicios
+    # ✅ SEGUNDO: Levantar servicios ANTES de verificar permisos
     echo -e "${YELLOW}🐳 Levantando servicios...${NC}"
     docker compose up -d
     
     echo -e "${YELLOW}⏳ Esperando que los servicios estén listos...${NC}"
     sleep 15
+    
+    # ✅ TERCERO: AHORA SÍ verificar permisos (contenedores YA corriendo)
+    echo -e "${YELLOW}🔧 Verificando y corrigiendo permisos...${NC}"
+    fix_permissions
     
     # Verificación
     echo -e "${YELLOW}🔍 Verificando despliegue...${NC}"
