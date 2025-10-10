@@ -4,7 +4,6 @@ import { seedAdminUser } from './common/seed-admin';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
-import { CompressionObfuscationInterceptor } from './interceptors/compression-obfuscation.interceptor'; // ✅ SIN .ts
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -58,16 +57,11 @@ async function bootstrap() {
         'Content-Type',
         'Authorization',
         'X-Requested-With',
-        'ngrok-skip-browser-warning',
-        'x-accept-obfuscated' // ✅ AGREGAR para que el frontend pueda indicar que acepta ofuscación
+        'ngrok-skip-browser-warning'
       ],
     });
 
     logger.log(`🛡️  CORS configurado para: ${allowedOrigins.join(', ')}`);
-
-    // ✅ INTERCEPTOR GLOBAL PARA OFUSCAR TODAS LAS RESPUESTAS
-    app.useGlobalInterceptors(new CompressionObfuscationInterceptor());
-    logger.log('🔒 CompressionObfuscationInterceptor activado - Todas las respuestas ofuscadas');
 
     // 🔒 VALIDATION PIPE - Global (PROTECCIÓN SQL INJECTION & XSS)
     app.useGlobalPipes(
@@ -131,14 +125,13 @@ async function bootstrap() {
     logger.log(`📊 Entorno: ${process.env.NODE_ENV || 'development'}`);
     logger.log(`🛡️  Seguridad: Validation Pipe ACTIVADO`);
     logger.log(`🔐 JWT: Configurado con clave segura`);
-    logger.log(`🔒 CompressionObfuscationInterceptor: ACTIVADO - Todas las respuestas ofuscadas`); // ✅ LOG ACTUALIZADO
     logger.log(`📧 SMTP: ${process.env.SMTP_HOST ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
     logger.log(`💳 Payphone: ${process.env.PAYPHONE_API_URL ? 'INTEGRADO' : 'NO CONFIGURADO'}`);
     logger.log(`📱 WhatsApp: ${process.env.WHATSAPP_API_TOKEN ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
-
+    
     // ✅ NUEVO LOG: IA CARGADA CON ÉXITO
     logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅ - Generación de descripciones activa' : 'NO CONFIGURADA'}`);
-
+    
     logger.log(`🌍 CORS: ${allowedOrigins.length} dominios permitidos`);
     logger.log('='.repeat(60));
     logger.log('📚 Endpoints principales:');
@@ -147,10 +140,10 @@ async function bootstrap() {
     logger.log(`   📊 Cursos:   ${backendUrl || `http://localhost:${port}`}/api/courses`);
     logger.log(`   💳 Pagos:    ${backendUrl || `http://localhost:${port}`}/api/payments`);
     logger.log(`   🖼️  Uploads:  ${backendUrl || `http://localhost:${port}`}/api/uploads`);
-
+    
     // ✅ NUEVO LOG: Endpoint de IA
     logger.log(`   🤖 IA:       ${backendUrl || `http://localhost:${port}`}/api/courses/api/generate-description`);
-
+    
     logger.log('='.repeat(60));
 
   } catch (error) {
