@@ -76,72 +76,74 @@ cleanup_environment() {
     fi
 }
 
-# ✅ FUNCIÓN CORREGIDA - Sin -T y con mejor manejo de errores
+# ✅ FUNCIÓN CORREGIDA - Con pausas y mejor feedback
 fix_permissions() {
-    echo -e "${YELLOW}🔧 Configurando permisos...${NC}"
+    echo -e "${YELLOW}🔧 INICIANDO REPARACIÓN DE PERMISOS...${NC}"
+    echo "=========================================="
     
-    # 1. Configurar permisos en el HOST
-    echo -e "${YELLOW}📁 Configurando permisos en HOST...${NC}"
+    # Pausa inicial para que se vea
+    sleep 1
+    
+    # 1. Permisos en HOST
+    echo -e "${YELLOW}📁 Paso 1/3: Configurando permisos en HOST...${NC}"
     mkdir -p uploads public
     sudo chown -R 1001:1001 uploads/ 2>/dev/null || true
     sudo chmod -R 755 uploads/ 2>/dev/null || true
     echo -e "${GREEN}✅ Permisos en HOST configurados${NC}"
+    sleep 1
     
-    # 2. Configurar permisos en el CONTENEDOR
-    echo -e "${YELLOW}🐳 Configurando permisos en el contenedor...${NC}"
-    
-    # ✅ CORREGIDO: Sin -T y con verificación paso a paso
-    if docker compose exec backend sh -c "
-        echo 'Paso 1: Creando carpeta /app/uploads...' && \
-        mkdir -p /app/uploads && \
-        echo 'Paso 2: Aplicando ownership...' && \
-        chown -R node:node /app/uploads && \
-        echo 'Paso 3: Aplicando permisos...' && \
-        chmod -R 755 /app/uploads && \
-        echo '✅ Permisos en contenedor configurados'
-    "; then
-        echo -e "${GREEN}✅ Permisos en CONTENEDOR configurados${NC}"
-    else
-        echo -e "${RED}❌ Error con docker compose exec${NC}"
-        echo -e "${YELLOW}💡 Probando con docker exec directo...${NC}"
-        
-        # ✅ ALTERNATIVA: Usar docker exec directo SIN -T
-        if docker exec cursos_backend sh -c "
-            echo 'Paso 1: Creando carpeta /app/uploads...' && \
-            mkdir -p /app/uploads && \
-            echo 'Paso 2: Aplicando ownership...' && \
-            chown -R node:node /app/uploads && \
-            echo 'Paso 3: Aplicando permisos...' && \
-            chmod -R 755 /app/uploads && \
-            echo '✅ Permisos en contenedor configurados'
-        "; then
-            echo -e "${GREEN}✅ Permisos en CONTENEDOR configurados (vía docker exec)${NC}"
-        else
-            echo -e "${RED}❌ No se pudo acceder al contenedor${NC}"
-            echo -e "${YELLOW}💡 El contenedor podría no estar listo${NC}"
-            return 1
-        fi
-    fi
-    
-    # 3. Verificar que funciona (con pausa para leer)
-    echo -e "${YELLOW}🔍 Verificando permisos...${NC}"
-    sleep 2
-    
-    # Probar con docker compose primero (SIN -T)
-    if docker compose exec backend sh -c "touch /app/uploads/test-$(date +%s).txt && echo '✅ Escritura exitosa'"; then
-        echo -e "${GREEN}✅ Escritura en /app/uploads/: OK${NC}"
-    # Si falla, probar con docker exec directo
-    elif docker exec cursos_backend sh -c "touch /app/uploads/test-$(date +%s).txt && echo '✅ Escritura exitosa'"; then
-        echo -e "${GREEN}✅ Escritura en /app/uploads/: OK${NC}"
-    else
-        echo -e "${RED}❌ Error: No se puede escribir en /app/uploads/${NC}"
-        echo -e "${YELLOW}💡 Verificando estado del contenedor...${NC}"
-        docker ps | grep backend
+    # 2. Verificar que el contenedor está corriendo
+    echo -e "${YELLOW}🔍 Paso 2/3: Verificando contenedor...${NC}"
+    if ! docker ps | grep -q cursos_backend; then
+        echo -e "${RED}❌ ERROR: El contenedor 'cursos_backend' no está corriendo${NC}"
+        echo -e "${YELLOW}💡 Inicia los servicios con la opción 4 primero${NC}"
+        read -p "Presiona Enter para volver al menú..."
         return 1
     fi
     
-    echo -e "${GREEN}🎉 Todos los permisos configurados correctamente${NC}"
-    return 0
+    echo -e "${GREEN}✅ Contenedor detectado: cursos_backend${NC}"
+    sleep 1
+    
+    # 3. Permisos en CONTENEDOR
+    echo -e "${YELLOW}🐳 Paso 3/3: Configurando permisos en CONTENEDOR...${NC}"
+    echo -e "${YELLOW}⏳ Esto puede tomar unos segundos...${NC}"
+    
+    # Ejecutar comandos con feedback visual
+    if docker exec cursos_backend mkdir -p /app/uploads 2>/dev/null; then
+        echo -e "${GREEN}✅ Carpeta /app/uploads creada${NC}"
+    else
+        echo -e "${RED}❌ Error creando carpeta${NC}"
+    fi
+    sleep 1
+    
+    if docker exec cursos_backend chown -R node:node /app/uploads 2>/dev/null; then
+        echo -e "${GREEN}✅ Ownership aplicado${NC}"
+    else
+        echo -e "${RED}❌ Error en ownership${NC}"
+    fi
+    sleep 1
+    
+    if docker exec cursos_backend chmod -R 755 /app/uploads 2>/dev/null; then
+        echo -e "${GREEN}✅ Permisos aplicados${NC}"
+    else
+        echo -e "${RED}❌ Error en permisos${NC}"
+    fi
+    sleep 1
+    
+    # 4. Verificación final
+    echo -e "${YELLOW}🔍 Verificando resultado...${NC}"
+    if docker exec cursos_backend touch /app/uploads/test-final-$(date +%s).txt 2>/dev/null; then
+        echo -e "${GREEN}🎉 ¡ÉXITO! Permisos configurados correctamente${NC}"
+        echo -e "${GREEN}✅ Ya puedes subir imágenes sin problemas${NC}"
+    else
+        echo -e "${RED}❌ FALLO: No se pudo verificar los permisos${NC}"
+        echo -e "${YELLOW}💡 Ejecuta estos comandos manualmente para diagnosticar:${NC}"
+        echo "docker exec cursos_backend ls -la /app/uploads/"
+        echo "docker exec cursos_backend id"
+    fi
+    
+    echo "=========================================="
+    read -p "Presiona Enter para volver al menú..."
 }
 
 # Función principal de instalación/actualización
