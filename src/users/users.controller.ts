@@ -7,7 +7,9 @@ import {
   Body,
   Post,
   Delete,
-  NotFoundException
+  NotFoundException,
+  UsePipes,
+  ValidationPipe
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -15,6 +17,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { UsersService } from './users.service';
+import { CreateUserDto } from './dto/create-user.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,6 +28,8 @@ export class UsersController {
     private readonly userRepository: Repository<User>,
   ) { }
 
+  // MANTENIENDO TODOS TUS MÉTODOS EXISTENTES, SOLO AGREGANDO SEGURIDAD AL CREATE
+
   @Get('profesores')
   async getProfesores() {
     return this.usersService.findProfesores();
@@ -32,6 +37,7 @@ export class UsersController {
 
   @Get('usuarios-por-rol')
   async getUsuariosPorRol() {
+    // MANTENIENDO TU CÓDIGO EXISTENTE
     const estudiantes = await this.userRepository
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.studentCourses', 'studentCourse')
@@ -43,7 +49,7 @@ export class UsersController {
         'user.password',
         'user.usuario',
         'user.rol',
-        'user.cedula' // ← AÑADE ESTA LÍNEA
+        'user.cedula'
       ])
       .where('user.rol = :rol', { rol: 'ESTUDIANTE' })
       .getMany();
@@ -58,7 +64,7 @@ export class UsersController {
       ciudad: u.ciudad,
       empresa: u.empresa,
       cargo: u.cargo,
-      cedula: u.cedula, // ← Esto ahora tendrá el valor correcto
+      cedula: u.cedula,
       password: u.password,
       cursos: (u.studentCourses || [])
         .filter(sc => !!sc.curso)
@@ -118,8 +124,9 @@ export class UsersController {
   }
 
   @Post()
-  async createUser(@Body() userData: Partial<User>) {
-    return this.usersService.create(userData);
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  async createUser(@Body() createUserDto: CreateUserDto) {
+    return this.usersService.create(createUserDto);
   }
 
   @Get(':id')

@@ -54,4 +54,12 @@ export class Course {
 
   @OneToMany(() => StudentCourse, (studentCourse) => studentCourse.curso)
   studentCourses: StudentCourse[];
+
+  // ✅ NUEVO: Campo para fecha de creación
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  createdAt: Date;
+
+  // ✅ NUEVO: Campo para fecha de actualización
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  updatedAt: Date;
 }

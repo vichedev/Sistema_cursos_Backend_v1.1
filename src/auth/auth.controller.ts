@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Query, BadRequestException, Request } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Query, BadRequestException, Request, UsePipes, ValidationPipe } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -11,16 +11,18 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @Post('login')
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
-  // Ruta GET para verificar correo electrónico
+  // Ruta GET para verificar correo electrónico (MANTENIENDO TU CÓDIGO)
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {
     if (!token) {
@@ -29,7 +31,7 @@ export class AuthController {
     return this.authService.verifyEmail(token);
   }
 
-  // Ruta POST para reenviar correo de verificación
+  // Ruta POST para reenviar correo de verificación (MANTENIENDO TU CÓDIGO)
   @Post('resend-verification')
   async resendVerification(@Body('email') email: string) {
     if (!email) {
@@ -38,7 +40,7 @@ export class AuthController {
     return this.authService.resendVerificationEmail(email);
   }
 
-  // Ruta protegida solo para ADMIN
+  // Ruta protegida solo para ADMIN (MANTENIENDO TU CÓDIGO)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('usuarios')

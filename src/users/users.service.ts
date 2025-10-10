@@ -1,9 +1,9 @@
-// src/users/users.service.ts
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User, Rol } from './user.entity';
 import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { CreateUserDto } from './dto/create-user.dto'; // ✅ AGREGAR ESTA IMPORTACIÓN
 
 @Injectable()
 export class UsersService {
@@ -38,7 +38,7 @@ export class UsersService {
     return this.repo.findOne({ where: { celular } });
   }
 
-  async create(data: Partial<User>) {
+  async create(data: Partial<User> | CreateUserDto) { // ✅ AHORA CreateUserDto ESTÁ DEFINIDO
     // Validar campos obligatorios
     if (!data.correo || !data.usuario || !data.cedula) {
       throw new BadRequestException('Correo, usuario y cédula son campos obligatorios');
@@ -79,6 +79,7 @@ export class UsersService {
     return this.repo.save(user);
   }
 
+  // ... el resto de tus métodos se mantienen igual
   async findById(id: number) {
     return this.repo.findOne({ where: { id } });
   }
@@ -92,7 +93,7 @@ export class UsersService {
     if (id === 1) {
       const protectedFields = ['usuario', 'rol', 'correo'];
       const hasProtectedFields = protectedFields.some(field => data[field] !== undefined);
-      
+
       if (hasProtectedFields) {
         throw new BadRequestException('No se pueden modificar campos críticos del administrador principal');
       }
@@ -137,7 +138,7 @@ export class UsersService {
     if (data.password && !data.password.startsWith('$2b$')) {
       data.password = await bcrypt.hash(data.password, 10);
     }
-    
+
     await this.repo.update(id, data);
     return this.findById(id);
   }
@@ -146,7 +147,7 @@ export class UsersService {
     if (id === 1) {
       throw new BadRequestException('No se puede eliminar el administrador principal del sistema');
     }
-    
+
     return this.repo.delete(id);
   }
 
@@ -165,27 +166,27 @@ export class UsersService {
 
   async checkDuplicates(checkData: { correo?: string; usuario?: string; cedula?: string; celular?: string }) {
     const duplicates: any = {};
-    
+
     if (checkData.correo) {
       const existing = await this.findByCorreo(checkData.correo);
       if (existing) duplicates.correo = 'Este correo ya está registrado';
     }
-    
+
     if (checkData.usuario) {
       const existing = await this.findByUsuario(checkData.usuario);
       if (existing) duplicates.usuario = 'Este usuario ya está en uso';
     }
-    
+
     if (checkData.cedula) {
       const existing = await this.findByCedula(checkData.cedula);
       if (existing) duplicates.cedula = 'Esta cédula ya está registrada';
     }
-    
+
     if (checkData.celular) {
       const existing = await this.findByCelular(checkData.celular);
       if (existing) duplicates.celular = 'Este celular ya está registrado';
     }
-    
+
     return duplicates;
   }
 }

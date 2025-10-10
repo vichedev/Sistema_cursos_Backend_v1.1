@@ -26,12 +26,51 @@ export class CoursesService {
     private mail: MailService,
     // ✅ inyecta el servicio SSE
     private readonly sse: NotificationsSseService,
-  ) {}
+  ) { }
 
   // ===============================
-  // CREAR CURSO + Notificación en segundo plano
+  // ✅ MÉTODO AUXILIAR: Formatear fecha sin zona horaria
+  // ===============================
+  private formatDateOnly(fecha: any): string {
+    // Si ya es un string en formato correcto, devolverlo
+    if (typeof fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return fecha;
+    }
+
+    // Si es un objeto Date, extraer solo año-mes-día
+    if (fecha instanceof Date) {
+      const year = fecha.getFullYear();
+      const month = String(fecha.getMonth() + 1).padStart(2, '0');
+      const day = String(fecha.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // Si es un string con hora (ISO), extraer solo la fecha
+    if (typeof fecha === 'string' && fecha.includes('T')) {
+      return fecha.split('T')[0];
+    }
+
+    // Fallback: intentar convertir a Date y formatear
+    try {
+      const d = new Date(fecha);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch {
+      return fecha;
+    }
+  }
+
+  // ===============================
+  // ✅ CREAR CURSO + Notificación en segundo plano
   // ===============================
   async create(data: any) {
+    // ✅ Asegurar que la fecha se guarde en formato correcto
+    if (data.fecha) {
+      data.fecha = this.formatDateOnly(data.fecha);
+    }
+
     const course = this.repo.create(data);
     const result = await this.repo.save(course);
 
@@ -145,11 +184,10 @@ export class CoursesService {
           <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
             <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
             <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
-            <p><b>👨‍🏫 Profesor:</b> ${
-              course.profesor
-                ? course.profesor.nombres + ' ' + course.profesor.apellidos
-                : 'Por confirmar'
-            }</p>
+            <p><b>👨‍🏫 Profesor:</b> ${course.profesor
+        ? course.profesor.nombres + ' ' + course.profesor.apellidos
+        : 'Por confirmar'
+      }</p>
             <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
             <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
           </div>
@@ -174,9 +212,8 @@ Se ha creado un nuevo curso:
 
 📅 *Fecha:* ${course.fecha || 'Por confirmar'}
 🕐 *Hora:* ${course.hora || 'Por confirmar'}
-👨‍🏫 *Profesor:* ${
-      course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'
-    }
+👨‍🏫 *Profesor:* ${course.profesor ? course.profesor.nombres + ' ' + course.profesor.apellidos : 'Por confirmar'
+      }
 💰 *Precio:* ${course.precio > 0 ? '$' + course.precio : 'Gratis'}
 📍 *Modalidad:* ${course.tipo.replace('_', ' ')}
 
@@ -212,39 +249,50 @@ Se ha creado un nuevo curso:
       this.logger.log(`📱 Mensaje WhatsApp enviado a ${numeroFormateado}`);
     } catch (error) {
       this.logger.error(
-        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${
-          JSON.stringify(error.response?.data) || error.message
+        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${JSON.stringify(error.response?.data) || error.message
         }`,
       );
     }
   }
 
   // ===============================
-  // RESTO DE MÉTODOS (sin cambios)
+  // ✅ MÉTODOS PRINCIPALES (con createdAt incluido)
   // ===============================
   findAll() {
     return this.repo.find({ where: { activo: true }, relations: ['profesor'] });
   }
+
   findById(id: number) {
     return this.repo.findOne({ where: { id }, relations: ['profesor'] });
   }
+
   async updateCupos(courseId: number, nuevoCupo: number) {
     await this.repo.update(courseId, { cupos: nuevoCupo });
   }
+
   async update(id: number, data: Partial<Course>) {
     const course = await this.findById(id);
     if (!course) throw new NotFoundException('Curso no encontrado');
+
+    // ✅ Si se actualiza la fecha, formatearla correctamente
+    if (data.fecha) {
+      data.fecha = this.formatDateOnly(data.fecha);
+    }
+
     await this.repo.update(id, data);
     return this.findById(id);
   }
+
   async findUserById(id: number) {
     return this.usersService.findById(id);
   }
+
   async softDeleteCourse(id: number) {
     const result = await this.repo.update(id, { activo: false });
     if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
     return { success: true };
   }
+
   async misCursos(userId: number) {
     const inscritos = await this.studentCourseRepo.find({ where: { estudianteId: userId } });
     const cursosIds = inscritos.map((x) => x.cursoId);
@@ -261,16 +309,28 @@ Se ha creado un nuevo curso:
       profesorAsignatura: curso.profesor ? curso.profesor.asignatura : null,
     }));
   }
+
   async estudiantesCurso(cursoId: number) {
     const inscripciones = await this.studentCourseRepo.find({ where: { cursoId } });
     const estudianteIds = inscripciones.map((x) => x.estudianteId);
     if (!estudianteIds.length) return [];
     return this.usersService.findByIds(estudianteIds);
   }
+
+  // ✅ MÉTODO CLAVE: Incluir createdAt en la respuesta
+  // src/courses/courses.service.ts
+
   async cursosConEstadoInscrito(userId: number) {
-    const cursos = await this.repo.find({ where: { activo: true }, relations: ['profesor'] });
+    // ✅ Asegurar que se seleccione createdAt en la consulta
+    const cursos = await this.repo.find({
+      where: { activo: true },
+      relations: ['profesor'],
+      select: ['id', 'titulo', 'descripcion', 'imagen', 'fecha', 'hora', 'precio', 'cupos', 'tipo', 'activo', 'createdAt', 'profesor'] // ✅ Incluir createdAt
+    });
+
     const inscritos = await this.studentCourseRepo.find({ where: { estudianteId: userId } });
     const inscritosIds = inscritos.map((x) => x.cursoId);
+
     return cursos.map((curso) => ({
       ...curso,
       inscrito: inscritosIds.includes(curso.id),
@@ -278,8 +338,11 @@ Se ha creado un nuevo curso:
         ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
         : null,
       asignatura: curso.profesor ? curso.profesor.asignatura : null,
+      // ✅ Ahora createdAt tendrá el valor correcto
+      createdAt: curso.createdAt,
     }));
   }
+
   async estudiantesCursoConPagos(cursoId: number) {
     const inscripciones = await this.studentCourseRepo.find({
       where: { cursoId },

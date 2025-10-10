@@ -1,6 +1,6 @@
 // src/payments/payments.controller.ts
-import { Controller, Post, Body, UseGuards, BadRequestException, Logger, Get, Query, Res, Req } from '@nestjs/common';
-import { Response, Request } from 'express';
+import { Controller, Post, Body, UseGuards, BadRequestException, Logger, Get, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { PayphoneService } from './payphone.service';
 import { MailService } from '../common/mail.service';
 import { CoursesService } from '../courses/courses.service';
@@ -115,7 +115,6 @@ export class PaymentsController {
           cursoId: body.cursoId,
           userId: body.userId,
           cursoTitulo: course.titulo,
-          // ✅ AGREGAR DATOS DEL USUARIO PARA CAMPOS OPCIONALES
           userData: {
             nombres: usuario.nombres,
             apellidos: usuario.apellidos,
@@ -147,7 +146,7 @@ export class PaymentsController {
     }
   }
 
-  // Endpoint principal para manejar redirección de Payphone
+  // ✅ ENDPOINT PRINCIPAL MEJORADO - CON PROTECCIONES
   @Get('payphone-confirm')
   async payphoneConfirm(
     @Query('id') id: string,
@@ -175,100 +174,257 @@ export class PaymentsController {
         return res.redirect(`${frontendUrl}/pago-fallido?error=pago_no_encontrado`);
       }
 
-      // ✅ === MEJORA 1: DETECCIÓN DE REVERSO AUTOMÁTICO ===
+      // ✅ PROTECCIÓN 1: Evitar doble procesamiento
+      if (paymentAttempt.status === 'Approved') {
+        this.logger.warn(`⚠️ PAGO YA PROCESADO - ClientTxId: ${clientTransactionId}`);
+        return res.redirect(`${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}&already_processed=true`);
+      }
+
+      // ✅ PROTECCIÓN 2: Calcular tiempo transcurrido
       const tiempoTranscurrido = Date.now() - paymentAttempt.createdAt.getTime();
-      const cincoMinutosEnMs = 5 * 60 * 1000;
+      const tiempoSegundos = Math.round(tiempoTranscurrido / 1000);
 
-      if (tiempoTranscurrido > cincoMinutosEnMs) {
-        this.logger.warn(`⏰ DETECTADO: Posible reverso automático de Payphone`);
-        this.logger.warn(`   Tiempo transcurrido: ${Math.round(tiempoTranscurrido / 1000)} segundos`);
-
-        // Solo registrar - Payphone YA reversó el dinero automáticamente
+      // ✅ PROTECCIÓN 3: SIEMPRE verificar con Payphone (no confiar solo en tiempo)
+      this.logger.log(`🔐 Consultando estado REAL en Payphone...`);
+      
+      let confirmacionData;
+      try {
+        confirmacionData = await this.payphoneService.confirmTransaction(id, clientTransactionId);
+      } catch (error) {
+        this.logger.error(`💥 Error consultando Payphone:`, error);
+        
+        // CRÍTICO: Si no podemos confirmar, marcar como pendiente (NO cancelar)
         await this.paymentAttemptRepo.update(paymentAttempt.id, {
-          status: 'REVERSADO_AUTOMATICO',
+          status: 'PENDIENTE_VERIFICACION',
           callbackData: JSON.stringify({
-            motivo: 'Payphone reversó automáticamente (timeout >5min)',
-            tiempoTranscurridoSeg: Math.round(tiempoTranscurrido / 1000),
-            nota: 'El dinero fue devuelto al cliente por Payphone Business'
+            error: 'No se pudo verificar con Payphone',
+            payphoneId: id,
+            timestamp: new Date().toISOString(),
+            errorDetails: error.message,
+            tiempoSegundos
           })
         });
 
-        return res.redirect(`${frontendUrl}/pago-fallido?error=timeout_reverso&clientTransactionId=${clientTransactionId}`);
-      }
-      // ✅ === FIN MEJORA 1 ===
+        // Alertar al administrador
+        await this.enviarAlertaAdministrador(paymentAttempt, 'ERROR_VERIFICACION', {
+          error: error.message,
+          tiempoSegundos
+        });
 
-      // Confirmar transacción con Payphone usando API oficial
-      this.logger.log(`🔐 Realizando confirmación oficial con Payphone...`);
-      const confirmacionData = await this.payphoneService.confirmTransaction(id, clientTransactionId);
+        return res.redirect(`${frontendUrl}/pago-pendiente?clientTransactionId=${clientTransactionId}`);
+      }
 
       const estadoReal = confirmacionData.transactionStatus;
-      this.logger.log(`✅ Estado real desde confirmación: ${estadoReal}`);
+      this.logger.log(`✅ Estado REAL desde Payphone: ${estadoReal}`);
 
-      // ✅ === MEJORA 2: MEJOR LOGGING ===
+      // Logging detallado
       this.logger.log(`📊 DETALLES DE TRANSACCIÓN:`, {
         transactionId: confirmacionData.transactionId,
         authorizationCode: confirmacionData.authorizationCode,
+        estadoPayphone: estadoReal,
+        tiempoProcesoSeg: tiempoSegundos,
         cardBrand: confirmacionData.cardBrand,
         lastDigits: confirmacionData.lastDigits,
         amount: confirmacionData.amount,
-        date: confirmacionData.date,
-        tiempoProcesoSeg: Math.round(tiempoTranscurrido / 1000)
+        date: confirmacionData.date
       });
-      // ✅ === FIN MEJORA 2 ===
 
-      // Actualizar PaymentAttempt con datos completos
+      // Actualizar con datos completos
       await this.paymentAttemptRepo.update(paymentAttempt.id, {
         payphoneId: id,
         status: estadoReal,
-        callbackData: JSON.stringify(confirmacionData),
+        callbackData: JSON.stringify({
+          ...confirmacionData,
+          tiempoProcesoSegundos: tiempoSegundos,
+          verificadoEn: new Date().toISOString()
+        }),
         updatedAt: new Date()
       });
 
-      this.logger.log(`✅ Transacción confirmada oficialmente - ${clientTransactionId}: ${estadoReal}`);
-
-      // Procesar según el estado
+      // ✅ PROCESAMIENTO SEGÚN ESTADO REAL
       if (estadoReal === 'Approved') {
-        this.logger.log(`🎉 Pago aprobado - Procesando inscripción`);
+        this.logger.log(`🎉 Pago APROBADO por Payphone`);
+        
+        // Verificar si tardó más de 5 minutos
+        if (tiempoSegundos > 300) {
+          this.logger.warn(`⚠️ CASO ESPECIAL: Pago aprobado después de 5 minutos (${tiempoSegundos}s)`);
+          this.logger.warn(`   Payphone SÍ cobró, procesando inscripción...`);
+          
+          await this.enviarAlertaAdministrador(paymentAttempt, 'APROBADO_TARDIO', {
+            tiempoSegundos,
+            mensaje: 'Pago procesado exitosamente pero tardó más de 5 minutos'
+          });
+        }
+
+        // Procesar inscripción
         await this.procesarInscripcionExitosa(paymentAttempt);
+        
         return res.redirect(`${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}`);
-      } else if (estadoReal === 'Canceled') {
-        this.logger.warn(`❌ Pago cancelado - Estado: ${estadoReal}`);
-        return res.redirect(`${frontendUrl}/pago-fallido?clientTransactionId=${clientTransactionId}&status=canceled`);
-      } else {
-        this.logger.warn(`⏸️  Pago con estado desconocido: ${estadoReal}`);
+        
+      } else if (estadoReal === 'Canceled' || estadoReal === 'Rejected') {
+        this.logger.warn(`❌ Pago rechazado/cancelado - Estado: ${estadoReal}`);
         return res.redirect(`${frontendUrl}/pago-fallido?clientTransactionId=${clientTransactionId}&status=${estadoReal}`);
+        
+      } else if (estadoReal === 'Pending') {
+        this.logger.warn(`⏳ Pago PENDIENTE en Payphone`);
+        
+        await this.enviarAlertaAdministrador(paymentAttempt, 'PENDIENTE_LARGO', {
+          tiempoSegundos,
+          mensaje: 'Transacción sigue pendiente después de callback'
+        });
+        
+        return res.redirect(`${frontendUrl}/pago-pendiente?clientTransactionId=${clientTransactionId}`);
+        
+      } else {
+        this.logger.error(`⚠️ Estado desconocido: ${estadoReal}`);
+        
+        await this.enviarAlertaAdministrador(paymentAttempt, 'ESTADO_DESCONOCIDO', {
+          estadoReal,
+          mensaje: 'Requiere revisión manual urgente'
+        });
+        
+        return res.redirect(`${frontendUrl}/pago-pendiente?clientTransactionId=${clientTransactionId}&unknown_status=true`);
       }
 
     } catch (error) {
-      this.logger.error(`💥 Error en callback Payphone:`, error);
-      return res.redirect(`${frontendUrl}/pago-fallido?error=error_procesamiento`);
+      this.logger.error(`💥 Error CRÍTICO en callback:`, error);
+      
+      try {
+        await this.paymentAttemptRepo.update(
+          { clientTransactionId },
+          {
+            status: 'ERROR_CRITICO',
+            callbackData: JSON.stringify({
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString()
+            })
+          }
+        );
+      } catch (dbError) {
+        this.logger.error('Error guardando en BD:', dbError);
+      }
+      
+      return res.redirect(`${frontendUrl}/pago-pendiente?error=error_procesamiento&clientTransactionId=${clientTransactionId}`);
     }
   }
 
-  // Método auxiliar para procesar inscripción exitosa
+  // ✅ MÉTODO PARA ALERTAS AL ADMINISTRADOR
+  private async enviarAlertaAdministrador(
+    paymentAttempt: PaymentAttempt,
+    tipoAlerta: string,
+    detalles?: any
+  ) {
+    try {
+      const curso = await this.coursesService.findById(paymentAttempt.cursoId);
+      const estudiante = await this.usersService.findById(paymentAttempt.userId);
+
+      const asunto = `🚨 ALERTA PAGO: ${tipoAlerta} - ${paymentAttempt.clientTransactionId}`;
+      
+      const mensaje = `
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff3cd; border-left: 4px solid #ffc107;">
+          <h2 style="color: #856404;">⚠️ Alerta de Sistema de Pagos</h2>
+          
+          <h3>Tipo de alerta: ${tipoAlerta}</h3>
+          
+          <h4>Información de la transacción:</h4>
+          <ul>
+            <li><b>Client Transaction ID:</b> ${paymentAttempt.clientTransactionId}</li>
+            <li><b>Payphone ID:</b> ${paymentAttempt.payphoneId || 'N/A'}</li>
+            <li><b>Estado actual:</b> ${paymentAttempt.status}</li>
+            <li><b>Monto:</b> $${paymentAttempt.amount}</li>
+            <li><b>Creado:</b> ${paymentAttempt.createdAt}</li>
+          </ul>
+          
+          <h4>Información del estudiante:</h4>
+          <ul>
+            <li><b>Nombre:</b> ${estudiante?.nombres} ${estudiante?.apellidos}</li>
+            <li><b>Email:</b> ${estudiante?.correo}</li>
+            <li><b>Teléfono:</b> ${estudiante?.celular}</li>
+          </ul>
+          
+          <h4>Información del curso:</h4>
+          <ul>
+            <li><b>Curso:</b> ${curso?.titulo}</li>
+            <li><b>ID:</b> ${curso?.id}</li>
+          </ul>
+          
+          ${detalles ? `
+            <h4>Detalles adicionales:</h4>
+            <pre style="background-color: #f8f9fa; padding: 10px; border-radius: 5px;">${JSON.stringify(detalles, null, 2)}</pre>
+          ` : ''}
+          
+          <div style="margin-top: 20px; padding: 15px; background-color: #d1ecf1; border-radius: 5px;">
+            <p><b>⚡ ACCIÓN REQUERIDA:</b></p>
+            <ol>
+              <li>Verificar el estado real en el panel de Payphone Business</li>
+              <li>Si el pago está aprobado en Payphone, inscribir manualmente al estudiante</li>
+              <li>Documentar la acción tomada</li>
+            </ol>
+          </div>
+          
+          <hr>
+          <small>Alerta generada automáticamente - ${new Date().toLocaleString()}</small>
+        </div>
+      `;
+
+      await this.mail.sendMail('cursos@rednuevaconexion.net', asunto, mensaje);
+
+      const whatsappMsg = `🚨 ALERTA PAGO: ${tipoAlerta}\n\nClientTxId: ${paymentAttempt.clientTransactionId}\nEstudiante: ${estudiante?.nombres}\nCurso: ${curso?.titulo}\nMonto: $${paymentAttempt.amount}\n\nREVISAR URGENTE en panel Payphone`;
+      
+      await this.enviarWhatsapp('0986819378', whatsappMsg);
+
+      this.logger.log(`📧 Alerta enviada al administrador: ${tipoAlerta}`);
+      
+    } catch (error) {
+      this.logger.error('Error enviando alerta:', error);
+    }
+  }
+
+  // ✅ MÉTODO MEJORADO PARA PROCESAR INSCRIPCIÓN
   private async procesarInscripcionExitosa(paymentAttempt: PaymentAttempt) {
-    this.logger.log(`🔄 Iniciando procesamiento de inscripción para PaymentAttempt ID: ${paymentAttempt.id}`);
+    this.logger.log(`🔄 Procesando inscripción - PaymentAttempt ID: ${paymentAttempt.id}`);
 
     const course = await this.coursesService.findById(paymentAttempt.cursoId);
     const estudiante = await this.usersService.findById(paymentAttempt.userId);
 
     if (!course || !estudiante) {
-      this.logger.error(`❌ Curso o estudiante no encontrado - Curso: ${!!course}, Estudiante: ${!!estudiante}`);
+      this.logger.error(`❌ Curso o estudiante no encontrado`);
       throw new Error('Curso o estudiante no encontrado');
     }
 
-    // Verificar que no esté ya inscrito (doble verificación)
+    // Protección contra doble inscripción
     const yaInscrito = await this.studentCourseRepo.findOne({
       where: { estudianteId: paymentAttempt.userId, cursoId: paymentAttempt.cursoId }
     });
 
     if (yaInscrito) {
-      this.logger.warn(`⚠️ Usuario ${paymentAttempt.userId} ya inscrito en curso ${paymentAttempt.cursoId} - Evitando duplicado`);
+      this.logger.warn(`⚠️ Usuario ya inscrito - Evitando duplicado`);
+      
+      await this.enviarAlertaAdministrador(paymentAttempt, 'DOBLE_INSCRIPCION_EVITADA', {
+        mensaje: 'Usuario ya estaba inscrito',
+        inscripcionExistente: yaInscrito.id
+      });
+      
       return;
     }
 
+    // Verificar cupos
+    if (course.cupos <= 0) {
+      this.logger.error(`❌ SIN CUPOS pero pago aprobado`);
+      
+      await this.enviarAlertaAdministrador(paymentAttempt, 'SIN_CUPOS_PERO_PAGO_APROBADO', {
+        mensaje: 'URGENTE: Cliente pagó pero no hay cupos',
+        cursoId: course.id,
+        cuposActuales: course.cupos
+      });
+      
+      this.logger.warn(`⚠️ Inscribiendo de todas formas (cliente pagó)`);
+    }
+
     // Procesar inscripción
-    await this.coursesService.updateCupos(course.id, course.cupos - 1);
+    await this.coursesService.updateCupos(course.id, Math.max(0, course.cupos - 1));
+    
     await this.studentCourseRepo.save({
       estudianteId: paymentAttempt.userId,
       cursoId: paymentAttempt.cursoId,
@@ -277,7 +433,6 @@ export class PaymentsController {
 
     this.logger.log(`✅ Inscripción completada - Usuario: ${estudiante.correo}, Curso: ${course.titulo}`);
 
-    // Enviar notificaciones
     await this.enviarNotificacionesInscripcion(course, estudiante, 'Payphone');
   }
 
@@ -286,7 +441,6 @@ export class PaymentsController {
     const profesorNombre = course.profesor ? `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
     const asignatura = course.profesor ? (course.profesor.asignatura || 'Por confirmar') : 'Por confirmar';
 
-    // Determinar el tipo de acceso y preparar el mensaje correspondiente
     let accesoMensaje = '';
     if (course.tipo && course.tipo.startsWith("ONLINE")) {
       accesoMensaje = `🔗 Enlace para la clase: ${course.link || 'Por confirmar'}`;
@@ -314,7 +468,6 @@ ${accesoMensaje}
 ¡Nos vemos en el curso!`;
 
     try {
-      // Enviar email al estudiante
       await this.mail.sendMail(
         estudiante.correo,
         'Confirmación de inscripción al curso',
@@ -339,61 +492,45 @@ ${accesoMensaje}
           
           <div style="margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 5px;">
             <h3 style="margin-top: 0;">¿Necesitas ayuda?</h3>
-            <p>Contáctanos por cualquier duda o inconveniente:</p>
+            <p>Contáctanos por cualquier duda:</p>
             <ul>
-              <li><b>📞 Teléfono de soporte:</b> 0986819378</li>
-              <li><b>✉️ Email de soporte:</b> <a href="mailto:vzamora@maat.ec">vzamora@maat.ec</a></li>
+              <li><b>📞 Teléfono:</b> 0986819378</li>
+              <li><b>✉️ Email:</b> <a href="mailto:vzamora@maat.ec">vzamora@maat.ec</a></li>
             </ul>
           </div>
           
           <br>
           <p><i>¡Nos vemos en el curso!</i></p>
           <hr>
-          <small>Este correo fue generado automáticamente por el sistema de Cursos MAAT.</small>
+          <small>Sistema de Cursos MAAT</small>
         </div>
         `
       );
 
-      // Enviar WhatsApp
       await this.enviarWhatsapp(estudiante.celular, mensajeWhatsApp);
 
-      // Notificar al administrador
       await this.mail.sendMail(
         'cursos@rednuevaconexion.net',
-        `Nuevo inscrito en el curso: ${course.titulo}`,
+        `Nuevo inscrito: ${course.titulo}`,
         `
         <div style="font-family: Arial, sans-serif; color:#222;">
           <h2>Nuevo inscrito (compra)</h2>
-          <p>El usuario <b>${estudiante.nombres} ${estudiante.apellidos}</b> (${estudiante.correo}) se inscribió en el curso pagado:</p>
+          <p><b>${estudiante.nombres} ${estudiante.apellidos}</b> (${estudiante.correo}) se inscribió:</p>
           <ul>
             <li><b>Curso:</b> ${course.titulo}</li>
             <li><b>Fecha:</b> ${course.fecha ? new Date(course.fecha).toLocaleDateString() : 'Por confirmar'}</li>
             <li><b>Hora:</b> ${course.hora || 'Por confirmar'}</li>
             <li><b>Docente:</b> ${profesorNombre}</li>
-            <li><b>Asignatura:</b> ${asignatura}</li>
             <li><b>Precio:</b> $${course.precio} (${metodoPago})</li>
-            <li><b>Contacto estudiante:</b> ${estudiante.celular}</li>
-            <li><b>Enlace proporcionado:</b> ${course.link || 'No disponible'}</li>
+            <li><b>Contacto:</b> ${estudiante.celular}</li>
           </ul>
-          
-          <div style="margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-left: 4px solid #4CAF50;">
-            <p><b>Información de contacto para el estudiante:</b></p>
-            <p>Se ha proporcionado al estudiante los siguientes datos de soporte:</p>
-            <ul>
-              <li><b>Soporte telefónico:</b> 0986819378</li>
-              <li><b>Email de soporte:</b> vzamora@maat.ec</li>
-            </ul>
-          </div>
-          
-          <hr>
-          <small>Este correo fue generado automáticamente por el sistema de Cursos MAAT.</small>
         </div>
         `
       );
 
-      this.logger.log(`📧 Notificaciones enviadas exitosamente para inscripción - Usuario: ${estudiante.correo}`);
+      this.logger.log(`📧 Notificaciones enviadas - Usuario: ${estudiante.correo}`);
     } catch (error) {
-      this.logger.error(`💥 Error enviando notificaciones para usuario ${estudiante.correo}:`, error);
+      this.logger.error(`Error enviando notificaciones:`, error);
     }
   }
 
@@ -429,12 +566,9 @@ ${accesoMensaje}
   @Get('check-payment-status')
   @UseGuards(JwtAuthGuard)
   async checkPaymentStatus(
-    @Query('paymentId') paymentId: string,
     @Query('clientTransactionId') clientTransactionId: string
   ) {
     try {
-      this.logger.log(`🔍 Verificando estado de pago - ClientTxId: ${clientTransactionId}`);
-
       if (!clientTransactionId) {
         throw new BadRequestException('clientTransactionId es requerido');
       }
@@ -444,11 +578,8 @@ ${accesoMensaje}
       });
 
       if (!paymentAttempt) {
-        this.logger.error(`❌ PaymentAttempt no encontrado para clientTransactionId: ${clientTransactionId}`);
         return { success: false, error: 'Pago no encontrado' };
       }
-
-      this.logger.log(`✅ Estado del pago encontrado: ${paymentAttempt.status}`);
 
       return {
         success: paymentAttempt.status === 'Approved',
@@ -459,24 +590,8 @@ ${accesoMensaje}
       };
 
     } catch (error) {
-      this.logger.error(`💥 Error verificando estado de pago ${clientTransactionId}:`, error);
+      this.logger.error(`Error verificando pago:`, error);
       return { success: false, error: 'Error verificando estado del pago' };
-    }
-  }
-
-  // Endpoint para historial de pagos
-  @Get('payment-history')
-  @UseGuards(JwtAuthGuard)
-  async getPaymentHistory(@Query('userId') userId: number) {
-    try {
-      const payments = await this.paymentAttemptRepo.find({
-        where: { userId },
-        order: { createdAt: 'DESC' }
-      });
-      return { success: true, payments };
-    } catch (error) {
-      this.logger.error(`💥 Error obteniendo historial de pagos para usuario ${userId}:`, error);
-      return { success: false, error: 'Error obteniendo historial' };
     }
   }
 
@@ -501,39 +616,4 @@ ${accesoMensaje}
       return { success: false, error: error.message };
     }
   }
-
-  // Limpieza de pagos expirados
-  @Post('cleanup-expired-payments')
-  async cleanupExpiredPayments() {
-    try {
-      const cincoMinutosAtras = new Date(Date.now() - (5 * 60 * 1000));
-
-      const expiredPayments = await this.paymentAttemptRepo
-        .createQueryBuilder('payment')
-        .where('payment.status = :status', { status: 'PENDIENTE' })
-        .andWhere('payment.createdAt < :date', { date: cincoMinutosAtras })
-        .getMany();
-
-      for (const payment of expiredPayments) {
-        await this.paymentAttemptRepo.update(payment.id, {
-          status: 'EXPIRADO',
-          callbackData: JSON.stringify({
-            motivo: 'Expirado por inactividad (>5min)',
-            expiradoEl: new Date().toISOString()
-          })
-        });
-      }
-
-      this.logger.log(`🧹 Limpieza completada: ${expiredPayments.length} transacciones expiradas`);
-      return {
-        success: true,
-        cleaned: expiredPayments.length
-      };
-
-    } catch (error) {
-      this.logger.error('💥 Error en limpieza de transacciones:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
 }
