@@ -1,6 +1,6 @@
 #!/bin/bash
 # deploy.sh - Sistema de Cursos MAAT - Panel de Control
-# VERSIÓN SEGURA - CON PROTECCIÓN DE BASE DE DATOS
+# VERSIÓN SEGURA - CON PROTECCIÓN Y RESTAURACIÓN DE BD
 
 # Colores para el menú
 RED='\033[0;31m'
@@ -29,7 +29,7 @@ show_header() {
     echo -e "${NC}"
 }
 
-# ✅ FUNCIÓN NUEVA: Verificar salud de la base de datos
+# ✅ FUNCIÓN MEJORADA: Verificar salud de la base de datos
 check_database_health() {
     echo -e "${YELLOW}🔍 Verificando salud de la base de datos...${NC}"
     
@@ -48,7 +48,7 @@ check_database_health() {
     fi
 }
 
-# ✅ FUNCIÓN NUEVA: Crear backup automático con verificación
+# ✅ FUNCIÓN MEJORADA: Crear backup automático con verificación
 create_automatic_backup() {
     local context="$1"
     echo -e "${YELLOW}💾 Creando backup automático ($context)...${NC}"
@@ -68,7 +68,108 @@ create_automatic_backup() {
     fi
 }
 
-# ✅ FUNCIÓN NUEVA: Protección contra eliminación de BD
+# ✅ FUNCIÓN NUEVA: Crear backup de emergencia OBLIGATORIO
+create_emergency_backup() {
+    local operation="$1"
+    echo -e "${YELLOW}🚨 CREANDO RESPALDO DE EMERGENCIA...${NC}"
+    
+    mkdir -p "$BACKUP_DIR"
+    local backup_file="$BACKUP_DIR/EMERGENCY_${operation}_$(date +"%Y%m%d_%H%M%S").sql"
+    
+    if ! docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$backup_file" 2>/dev/null; then
+        echo -e "${RED}❌ CRÍTICO: No se pudo crear respaldo de emergencia${NC}"
+        echo -e "${RED}🚨 NO CONTINÚES LA OPERACIÓN${NC}"
+        return 1
+    fi
+    
+    gzip "$backup_file"
+    echo -e "${GREEN}✅ Respaldo de emergencia creado: ${backup_file}.gz${NC}"
+    return 0
+}
+
+# ✅ FUNCIÓN NUEVA: Restaurar Base de Datos
+restore_database() {
+    show_header
+    echo -e "${PURPLE}🔄 RESTAURAR BASE DE DATOS${NC}"
+    echo "=========================================="
+    
+    # Verificar que hay backups
+    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR/*.sql.gz 2>/dev/null)" ]; then
+        echo -e "${RED}❌ No hay backups disponibles para restaurar${NC}"
+        read -p "Presiona Enter para volver al menú..."
+        return 1
+    fi
+    
+    # Listar backups disponibles
+    echo -e "${CYAN}📋 Backups disponibles:${NC}"
+    local backups=($(ls -t $BACKUP_DIR/*.sql.gz))
+    local i=1
+    for backup in "${backups[@]}"; do
+        echo "  $i) $(basename $backup) ($(du -h $backup | cut -f1))"
+        ((i++))
+    done
+    
+    echo ""
+    read -p "Selecciona el número del backup a restaurar (1-$((i-1))): " backup_choice
+    
+    # Validar selección
+    if [[ ! $backup_choice =~ ^[0-9]+$ ]] || [ $backup_choice -lt 1 ] || [ $backup_choice -ge $i ]; then
+        echo -e "${RED}❌ Selección inválida${NC}"
+        read -p "Presiona Enter para volver al menú..."
+        return 1
+    fi
+    
+    local selected_backup="${backups[$((backup_choice-1))]}"
+    
+    echo ""
+    echo -e "${YELLOW}📦 Backup seleccionado: $(basename $selected_backup)${NC}"
+    echo -e "${RED}🚨 ADVERTENCIA: Esta acción SOBREESCRIBIRÁ la base de datos actual${NC}"
+    echo -e "${RED}🚨 Todos los datos posteriores al backup se PERDERÁN${NC}"
+    echo ""
+    read -p "¿Estás ABSOLUTAMENTE seguro? Escribe 'RESTAURAR-BD': " confirmation
+    
+    if [ "$confirmation" != "RESTAURAR-BD" ]; then
+        echo -e "${YELLOW}❌ Restauración cancelada${NC}"
+        read -p "Presiona Enter para volver al menú..."
+        return 1
+    fi
+    
+    # ✅ CREAR BACKUP DE LA BD ACTUAL (por si acaso)
+    echo -e "${YELLOW}💾 Creando backup de la base de datos actual...${NC}"
+    local current_backup="$BACKUP_DIR/pre_restore_$(date +"%Y%m%d_%H%M%S").sql"
+    docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$current_backup" 2>/dev/null && gzip "$current_backup"
+    echo -e "${GREEN}✅ Backup de seguridad creado${NC}"
+    
+    # Detener servicios que usan la BD
+    echo -e "${YELLOW}⏸️  Deteniendo servicios...${NC}"
+    docker compose stop backend
+    
+    # Restaurar backup
+    echo -e "${YELLOW}🔄 Restaurando base de datos...${NC}"
+    if gunzip -c "$selected_backup" | docker exec -i cursos_postgres psql -U postgres sistema_cursos; then
+        echo -e "${GREEN}✅ Base de datos restaurada exitosamente${NC}"
+    else
+        echo -e "${RED}❌ Error al restaurar la base de datos${NC}"
+        echo -e "${YELLOW}💡 Se creó un backup pre-restauración: $(basename $current_backup).gz${NC}"
+    fi
+    
+    # Reiniciar servicios
+    echo -e "${YELLOW}🚀 Reiniciando servicios...${NC}"
+    docker compose start backend
+    
+    # Verificar restauración
+    echo -e "${YELLOW}🔍 Verificando restauración...${NC}"
+    sleep 5
+    if check_database_health; then
+        echo -e "${GREEN}🎉 ¡RESTAURACIÓN COMPLETADA EXITOSAMENTE!${NC}"
+    else
+        echo -e "${RED}⚠️  Advertencia: Verificar estado del sistema después de la restauración${NC}"
+    fi
+    
+    read -p "Presiona Enter para volver al menú..."
+}
+
+# ✅ FUNCIÓN MEJORADA: Protección contra eliminación de BD
 protect_database() {
     local operation="$1"
     
@@ -97,14 +198,16 @@ protect_database() {
         fi
     fi
     
-    # 3. Crear backup automático
-    create_automatic_backup "pre_${operation}"
+    # 3. ✅ CREAR BACKUP DE EMERGENCIA OBLIGATORIO
+    if ! create_emergency_backup "$operation"; then
+        return 1
+    fi
     
     echo -e "${GREEN}✅ Protección de base de datos activada${NC}"
     return 0
 }
 
-# ✅ FUNCIÓN NUEVA: Verificación post-operación
+# ✅ FUNCIÓN MEJORADA: Verificación post-operación
 verify_operation_success() {
     local operation="$1"
     
@@ -246,10 +349,10 @@ backup_database() {
     read -p "Presiona Enter para volver al menú..."
 }
 
-# ✅ FUNCIÓN MEJORADA: Actualizar desde Git
+# ✅ FUNCIÓN MEJORADA SEGURA: Actualizar desde Git
 update_from_git() {
     show_header
-    echo -e "${BLUE}📥 ACTUALIZACIÓN DESDE GIT${NC}"
+    echo -e "${BLUE}📥 ACTUALIZACIÓN SEGURA DESDE GIT${NC}"
     echo "=========================================="
     
     if ! is_system_configured; then
@@ -270,17 +373,14 @@ update_from_git() {
     
     if git pull origin main; then
         echo -e "${GREEN}✅ Código actualizado desde Git${NC}"
-        echo -e "${YELLOW}🔄 Reiniciando servicios con los nuevos cambios...${NC}"
+        echo -e "${YELLOW}🔄 Reconstruyendo servicios...${NC}"
         
-        # ✅ DETENER SIN ELIMINAR VOLÚMENES
-        echo -e "${YELLOW}⏸️  Deteniendo servicios (preservando BD)...${NC}"
-        docker compose down  # ← NUNCA con -v
-        
-        echo -e "${YELLOW}🏗️  Reconstruyendo servicios...${NC}"
+        # ✅ MÉTODO SEGURO: Construir sin detener
         docker compose build --no-cache backend
         
-        echo -e "${YELLOW}🚀 Iniciando servicios...${NC}"
-        docker compose up -d
+        echo -e "${YELLOW}🚀 Reiniciando servicios...${NC}"
+        # ✅ MÉTODO SEGURO: Recargar solo el backend
+        docker compose up -d --no-deps backend
         
         # ✅ VERIFICAR QUE TODO FUNCIONE
         if verify_operation_success "actualización_git"; then
@@ -297,12 +397,12 @@ update_from_git() {
     read -p "Presiona Enter para continuar..."
 }
 
-# ✅ FUNCIÓN MEJORADA: Instalar/Actualizar Sistema
+# ✅ FUNCIÓN MEJORADA SEGURA: Instalar/Actualizar Sistema
 install_or_update_system() {
     show_header
     
     if is_system_configured; then
-        echo -e "${BLUE}🔄 ACTUALIZANDO SISTEMA${NC}"
+        echo -e "${BLUE}🔄 ACTUALIZACIÓN SEGURA DEL SISTEMA${NC}"
         # ✅ PROTECCIÓN EN MODO ACTUALIZACIÓN
         if ! protect_database "actualizacion_sistema"; then
             echo -e "${RED}❌ Actualización cancelada por protección de BD${NC}"
@@ -327,7 +427,7 @@ install_or_update_system() {
         docker compose build --no-cache backend
     fi
     
-    # Levantar servicios
+    # Levantar servicios (método seguro)
     echo -e "${YELLOW}🐳 Levantando servicios...${NC}"
     docker compose up -d
     
@@ -411,7 +511,7 @@ reset_system() {
     read -p "Presiona Enter para continuar..."
 }
 
-# ✅ FUNCIÓN NUEVA: Ver estado con verificación de BD
+# ✅ FUNCIÓN MEJORADA: Ver estado con verificación de BD
 show_status() {
     show_header
     echo -e "${GREEN}📊 ESTADO DEL SISTEMA${NC}"
@@ -451,9 +551,8 @@ show_status() {
     read -p "Presiona Enter para continuar..."
 }
 
-# 🔄 FUNCIONES EXISTENTES (sin cambios)
+# 🔄 FUNCIÓN DE PERMISOS (sin cambios)
 fix_permissions() {
-    # ... (mantener tu función existente igual)
     echo -e "${YELLOW}🔧 INICIANDO REPARACIÓN DE PERMISOS...${NC}"
     echo "=========================================="
     sleep 1
@@ -519,11 +618,12 @@ main_menu() {
         echo "7. 📝 Ver Logs"
         echo "8. 🧹 Liberar Espacio Seguro"
         echo "9. 💾 Respaldar Base de Datos"
-        echo "10. 🗑️  Resetear Sistema (cuidado!)"
-        echo "11. ❌ Salir"
+        echo "10. 🔄 Restaurar Base de Datos"
+        echo "11. 🗑️  Resetear Sistema (cuidado!)"
+        echo "12. ❌ Salir"
         echo "=========================================="
         
-        read -p "Selecciona una opción (1-11): " choice
+        read -p "Selecciona una opción (1-12): " choice
         
         case $choice in
             1) install_or_update_system ;;
@@ -538,8 +638,9 @@ main_menu() {
                 ;;
             8) free_space_safe ;;
             9) backup_database ;;
-            10) reset_system ;;
-            11) 
+            10) restore_database ;;
+            11) reset_system ;;
+            12) 
                 echo -e "${GREEN}👋 ¡Hasta pronto!${NC}"
                 exit 0
                 ;;
