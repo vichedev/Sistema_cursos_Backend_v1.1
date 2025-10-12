@@ -37,11 +37,11 @@ export async function seedAdminUser(app: INestApplication) {
       password: hash,
       rol: 'ADMIN',
       asignatura,
-      emailVerified: true, // El admin por defecto siempre está verificado
+      emailVerified: true, 
     });
     console.log('Usuario administrador creado y verificado');
   } else if (!existe.emailVerified) {
-    // Si el admin ya existe pero no está verificado, lo verificamos
+  
     existe.emailVerified = true;
     await usersService.save(existe);
     console.log('Usuario administrador verificado');

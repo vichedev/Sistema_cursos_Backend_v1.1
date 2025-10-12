@@ -8,8 +8,12 @@ import {
   Post,
   Delete,
   NotFoundException,
+  BadRequestException,
+  UnauthorizedException,
   UsePipes,
-  ValidationPipe
+  ValidationPipe,
+  UseInterceptors,
+  Request // ✅ AGREGAR ESTE IMPORT
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -28,8 +32,6 @@ export class UsersController {
     private readonly userRepository: Repository<User>,
   ) { }
 
-  // MANTENIENDO TODOS TUS MÉTODOS EXISTENTES, SOLO AGREGANDO SEGURIDAD AL CREATE
-
   @Get('profesores')
   async getProfesores() {
     return this.usersService.findProfesores();
@@ -37,76 +39,67 @@ export class UsersController {
 
   @Get('usuarios-por-rol')
   async getUsuariosPorRol() {
-    // ✅ VERSIÓN CORREGIDA - SOLO CEDULA VISIBLE
-    const estudiantes = await this.userRepository
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.studentCourses', 'studentCourse')
-      .leftJoinAndSelect('studentCourse.curso', 'curso')
-      .addSelect([
-        'user.ciudad',
-        'user.empresa',
-        'user.cargo',
-        'user.cedula'  // ✅ MANTENER CÉDULA
-        // ❌ ELIMINAR: password, usuario
-      ])
-      .where('user.rol = :rol', { rol: 'ESTUDIANTE' })
-      .getMany();
+    try {
+      // ✅ VERIFICAR SI HAY USUARIOS EN LA BASE DE DATOS
+      const totalUsuarios = await this.userRepository.count();
 
-    const estudiantesFormateados = estudiantes.map(u => ({
-      id: u.id,
-      nombres: u.nombres,
-      apellidos: u.apellidos,
-      correo: u.correo,
-      cedula: u.cedula,  // ✅ MANTENER CÉDULA
-      rol: u.rol,
-      ciudad: u.ciudad,
-      empresa: u.empresa,
-      cargo: u.cargo,
-      // ❌ ELIMINAR: password, usuario
-      cursos: (u.studentCourses || [])
-        .filter(sc => !!sc.curso)
-        .map(sc => ({
-          id: sc.curso.id,
-          titulo: sc.curso.titulo,
-        })),
-    }));
+      const todosLosUsuarios = await this.userRepository.find();
 
-    const administradores = await this.userRepository
-      .createQueryBuilder('user')
-      .select([
-        'user.id',
-        'user.nombres',
-        'user.apellidos',
-        'user.correo',
-        'user.cedula',  // ✅ MANTENER CÉDULA
-        'user.rol',
-        'user.ciudad',
-        'user.empresa',
-        'user.cargo',
-        'user.asignatura',
-        // ❌ ELIMINAR: password, usuario
-      ])
-      .where('user.rol = :rol', { rol: 'ADMIN' })
-      .getMany();
+      // OBTENER ESTUDIANTES
+      const estudiantesQuery = await this.userRepository
+        .createQueryBuilder('user')
+        .leftJoinAndSelect('user.studentCourses', 'studentCourse')
+        .leftJoinAndSelect('studentCourse.curso', 'curso')
+        .where('user.rol = :rol', { rol: 'ESTUDIANTE' })
+        .getMany();
 
-    const administradoresFormateados = administradores.map(u => ({
-      id: u.id,
-      nombres: u.nombres,
-      apellidos: u.apellidos,
-      correo: u.correo,
-      cedula: u.cedula,  // ✅ MANTENER CÉDULA
-      rol: u.rol,
-      ciudad: u.ciudad,
-      empresa: u.empresa,
-      cargo: u.cargo,
-      asignatura: u.asignatura,
-      // ❌ ELIMINAR: password, usuario
-    }));
+      const estudiantes = estudiantesQuery.map(user => ({
+        id: user.id,
+        nombres: user.nombres,
+        apellidos: user.apellidos,
+        correo: user.correo,
+        usuario: user.usuario,
+        rol: user.rol,
+        ciudad: user.ciudad,
+        empresa: user.empresa,
+        cargo: user.cargo,
+        cedula: user.cedula,
+        cursos: (user.studentCourses || []).map(sc => ({
+          id: sc.curso?.id,
+          titulo: sc.curso?.titulo,
+        })).filter(curso => curso.id && curso.titulo)
+      }));
 
-    return {
-      estudiantes: estudiantesFormateados,
-      administradores: administradoresFormateados,
-    };
+      const administradoresQuery = await this.userRepository
+        .createQueryBuilder('user')
+        .where('user.rol = :rol', { rol: 'ADMIN' })
+        .getMany();
+
+      const administradores = administradoresQuery.map(user => ({
+        id: user.id,
+        nombres: user.nombres,
+        apellidos: user.apellidos,
+        correo: user.correo,
+        usuario: user.usuario,
+        rol: user.rol,
+        ciudad: user.ciudad,
+        empresa: user.empresa,
+        cargo: user.cargo,
+        asignatura: user.asignatura,
+      }));
+
+      const result = {
+        estudiantes: estudiantes,
+        administradores: administradores,
+      };
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error en getUsuariosPorRol:', error);
+      console.error('❌ Stack trace:', error.stack);
+      throw new BadRequestException('Error al cargar los usuarios');
+    }
   }
 
   @Post('check-duplicates')
@@ -126,11 +119,48 @@ export class UsersController {
   }
 
   @Get(':id')
-  async getUserById(@Param('id') id: number) {
-    const user = await this.usersService.findById(id);
+  @UseGuards(JwtAuthGuard)
+  async getUserById(@Param('id') id: number, @Request() req) { // ✅ AHORA FUNCIONA
+    const requestingUser = req.user;
+
+    // ✅ VERIFICAR PERMISOS
+    if (requestingUser.userId !== id && requestingUser.rol !== 'ADMIN') {
+      throw new UnauthorizedException('No tienes permisos para ver este perfil');
+    }
+
+    // ✅ USAR QUERY BUILDER PARA CONTROL PRECISO
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .select([
+        'user.id',
+        'user.nombres',
+        'user.apellidos',
+        'user.ciudad',
+        'user.empresa',
+        'user.cargo',
+        'user.rol',
+        'user.asignatura',
+        'user.activo',
+        'user.emailVerified',
+        // ✅ Solo admin ve datos sensibles
+        ...(requestingUser.rol === 'ADMIN' ? [
+          'user.correo',
+          'user.usuario',
+          'user.cedula',
+          'user.celular'
+        ] : [
+          'user.correo' // ✅ Usuario normal ve su email
+        ])
+        // ❌ NUNCA incluir: password, tokens
+      ])
+      .where('user.id = :id', { id })
+      .andWhere('user.activo = :activo', { activo: true })
+      .getOne();
+
     if (!user) {
       throw new NotFoundException('Usuario no encontrado');
     }
+
     return user;
   }
 

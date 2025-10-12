@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
 
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
@@ -25,7 +26,6 @@ async function bootstrap() {
     // Agregar FRONTEND_URL desde variables de entorno (PRINCIPAL)
     const frontendUrl = process.env.FRONTEND_URL;
     if (frontendUrl) {
-      // Limpiar y validar la URL
       const cleanFrontendUrl = frontendUrl.trim();
       if (!allowedOrigins.includes(cleanFrontendUrl)) {
         allowedOrigins.push(cleanFrontendUrl);
@@ -33,7 +33,7 @@ async function bootstrap() {
       }
     }
 
-    // Agregar BACKEND_URL si es diferente (para casos específicos)
+    // Agregar BACKEND_URL si es diferente
     const backendUrl = process.env.BACKEND_URL;
     if (backendUrl && backendUrl !== frontendUrl) {
       const cleanBackendUrl = backendUrl.trim();
@@ -90,7 +90,7 @@ async function bootstrap() {
 
     logger.log('🔒 Validation Pipe activado - Protección contra SQL Injection y XSS');
 
-    // ✅ Servir archivos estáticos (ANTES del prefijo global)
+    // ✅ Servir archivos estáticos
     if (process.env.NODE_ENV === 'production') {
       app.useStaticAssets(join(__dirname, '..', 'public'), {
         prefix: '/',
@@ -104,7 +104,7 @@ async function bootstrap() {
     });
     logger.log('📁 Serviendo archivos multimedia desde /uploads');
 
-    // 🔧 Configuración global de seguridad (DESPUÉS de archivos estáticos)
+    // 🔧 Configuración global
     app.setGlobalPrefix('api');
     logger.log('🌍 Prefijo global configurado: /api');
 
@@ -124,26 +124,13 @@ async function bootstrap() {
     logger.log(`🌐 URL Frontend: ${frontendUrl || 'No configurada'}`);
     logger.log(`📊 Entorno: ${process.env.NODE_ENV || 'development'}`);
     logger.log(`🛡️  Seguridad: Validation Pipe ACTIVADO`);
+    logger.log(`🔒 Sanitize: Interceptor de seguridad ACTIVADO`);
     logger.log(`🔐 JWT: Configurado con clave segura`);
     logger.log(`📧 SMTP: ${process.env.SMTP_HOST ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
     logger.log(`💳 Payphone: ${process.env.PAYPHONE_API_URL ? 'INTEGRADO' : 'NO CONFIGURADO'}`);
     logger.log(`📱 WhatsApp: ${process.env.WHATSAPP_API_TOKEN ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
-    
-    // ✅ NUEVO LOG: IA CARGADA CON ÉXITO
-    logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅ - Generación de descripciones activa' : 'NO CONFIGURADA'}`);
-    
+    logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅' : 'NO CONFIGURADA'}`);
     logger.log(`🌍 CORS: ${allowedOrigins.length} dominios permitidos`);
-    logger.log('='.repeat(60));
-    logger.log('📚 Endpoints principales:');
-    logger.log(`   🔐 Auth:     ${backendUrl || `http://localhost:${port}`}/api/auth`);
-    logger.log(`   👥 Usuarios: ${backendUrl || `http://localhost:${port}`}/api/users`);
-    logger.log(`   📊 Cursos:   ${backendUrl || `http://localhost:${port}`}/api/courses`);
-    logger.log(`   💳 Pagos:    ${backendUrl || `http://localhost:${port}`}/api/payments`);
-    logger.log(`   🖼️  Uploads:  ${backendUrl || `http://localhost:${port}`}/api/uploads`);
-    
-    // ✅ NUEVO LOG: Endpoint de IA
-    logger.log(`   🤖 IA:       ${backendUrl || `http://localhost:${port}`}/api/courses/api/generate-description`);
-    
     logger.log('='.repeat(60));
 
   } catch (error) {

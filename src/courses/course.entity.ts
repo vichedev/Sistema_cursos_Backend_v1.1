@@ -39,7 +39,6 @@ export class Course {
 
   // Relación ManyToOne hacia User (profesor) - AGREGAR onDelete
   @ManyToOne(() => User, (user) => user.cursosDictados, { 
-    eager: true, 
     nullable: true,
     onDelete: 'SET NULL' // ✅ AGREGAR ESTO - Los cursos quedan sin profesor
   })

@@ -130,14 +130,10 @@ export class AuthService {
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
-  
-
     // Verificar el hash
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
 
-
     if (!isPasswordValid) {
-      
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
@@ -151,13 +147,15 @@ export class AuthService {
       rol: user.rol
     };
 
+    // ✅ RESPUESTA SEGURA - Solo datos necesarios
     return {
       token: this.jwtService.sign(payload),
       rol: user.rol,
       cargo: user.cargo,
-      usuario: user.usuario,
+      usuario: user.usuario, // ✅ Necesario para el frontend
       nombres: user.nombres,
       userId: user.id,
+      // ❌ NO incluir: password, cedula, celular, correo, etc.
     };
   }
 }

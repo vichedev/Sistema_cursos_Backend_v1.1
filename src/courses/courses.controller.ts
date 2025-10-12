@@ -11,28 +11,30 @@ import {
   Delete,
   Put,
   ParseIntPipe,
-  Query, // ✅ Agregar este import
-  BadRequestException, // ✅ Agregar este import
+  Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { AIService } from '../common/ai.service'; // ✅ Agregar este import
+import { AIService } from '../common/ai.service';
 
 @Controller('courses')
 export class CoursesController {
   constructor(
     private readonly coursesService: CoursesService,
-    private readonly aiService: AIService, // ✅ Agregar esta inyección
+    private readonly aiService: AIService,
   ) { }
 
-  // ✅ AGREGAR ESTE NUEVO ENDPOINT (antes del primer método existente)
+  // ✅ ENDPOINT PARA GENERAR DESCRIPCIÓN AUTOMÁTICA CON IA
+  // Solo usuarios autenticados pueden usar esta función
   @Get('api/generate-description')
   @UseGuards(JwtAuthGuard)
   async generateDescription(@Query('titulo') titulo: string) {
     try {
+      // Validaciones de entrada
       if (!titulo || titulo.trim().length < 3) {
         throw new BadRequestException('El título debe tener al menos 3 caracteres');
       }
@@ -41,8 +43,9 @@ export class CoursesController {
         throw new BadRequestException('El título es demasiado largo (máximo 100 caracteres)');
       }
 
+      // Generar descripción usando el servicio de IA
       const description = await this.aiService.generateCourseDescription(titulo.trim());
-      
+
       return {
         success: true,
         data: {
@@ -59,7 +62,8 @@ export class CoursesController {
     }
   }
 
-  // EL RESTO DE TU CÓDIGO EXISTente SE MANTIENE IGUAL...
+  // ✅ CREAR NUEVO CURSO
+  // Solo ADMIN puede crear cursos, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('create')
@@ -69,26 +73,30 @@ export class CoursesController {
     @UploadedFile() file: Express.Multer.File,
     @Request() req,
   ) {
+    // Obtener ID del profesor (puede venir del body o del usuario autenticado)
     let profesorId = body.profesorId || req.user.userId;
     let profesorNombre = '';
     let profesorAsignatura = '';
 
+    // Buscar información del profesor si se proporciona ID
     if (profesorId) {
       const user = await this.coursesService.findUserById(Number(profesorId));
       profesorNombre = user ? `${user.nombres} ${user.apellidos}` : '';
       profesorAsignatura = user?.asignatura || '';
     }
 
+    // Crear el curso con los datos proporcionados
     return this.coursesService.create({
       ...body,
-      imagen: file ? file.filename : null,
+      imagen: file ? file.filename : null, // Guardar nombre del archivo si se subió imagen
       profesorId,
       profesorNombre,
       profesorAsignatura,
     });
   }
 
-  // ... EL RESTO DE TUS MÉTODOS EXISTENTES SE MANTIENEN EXACTAMENTE IGUAL
+  // ✅ ACTUALIZAR CURSO EXISTENTE
+  // Solo ADMIN puede actualizar cursos, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Put(':id')
@@ -100,7 +108,7 @@ export class CoursesController {
   ) {
     const updateData: any = { ...body };
 
-    // Convertir campos numéricos
+    // Convertir campos numéricos a los tipos correctos
     if (body.profesorId) updateData.profesorId = Number(body.profesorId);
     if (body.cupos) updateData.cupos = Number(body.cupos);
     if (body.precio) updateData.precio = parseFloat(body.precio);
@@ -113,25 +121,36 @@ export class CoursesController {
     return this.coursesService.update(id, updateData);
   }
 
+  // ✅ ELIMINACIÓN LÓGICA DE CURSO
+  // Solo ADMIN puede eliminar cursos, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete(':id')
   async delete(@Param('id', ParseIntPipe) id: number) {
-    return this.coursesService.softDeleteCourse(id);
+    return this.coursesService.softDeleteCourse(id); // Eliminación lógica (no física)
   }
 
+  // ✅ OBTENER CURSOS DISPONIBLES PARA INSCRIPCIÓN
+  // Solo usuarios autenticados pueden ver cursos disponibles
   @UseGuards(JwtAuthGuard)
   @Get('disponibles')
   async disponibles(@Request() req) {
     const userId = req.user.userId;
+    // Retorna cursos con información del estado de inscripción del usuario
     return this.coursesService.cursosConEstadoInscrito(userId);
   }
 
+  // ✅ OBTENER TODOS LOS CURSOS (ENDPOINT PÚBLICO PERO CON DATOS FILTRADOS)
+  // Este endpoint es público pero filtra información sensible
   @Get('all')
   async all() {
-    return this.coursesService.findAll();
+    const courses = await this.coursesService.findAll();
+    // Filtrar datos sensibles antes de retornar
+    return this.filterPublicCourseData(courses);
   }
 
+  // ✅ OBTENER CURSOS DEL USUARIO AUTENTICADO
+  // Solo usuarios autenticados pueden ver sus cursos
   @UseGuards(JwtAuthGuard)
   @Get('mis-cursos')
   async misCursos(@Request() req) {
@@ -139,6 +158,8 @@ export class CoursesController {
     return this.coursesService.misCursos(userId);
   }
 
+  // ✅ OBTENER ESTUDIANTES INSCRITOS EN UN CURSO
+  // Solo ADMIN puede ver la lista de estudiantes, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id/estudiantes')
@@ -146,7 +167,8 @@ export class CoursesController {
     return this.coursesService.estudiantesCurso(id);
   }
 
-  // En tu courses.controller.ts
+  // ✅ OBTENER ESTUDIANTES CON INFORMACIÓN DE PAGOS
+  // Solo ADMIN puede ver información de pagos, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id/estudiantes-con-pagos')
@@ -154,10 +176,45 @@ export class CoursesController {
     return this.coursesService.estudiantesCursoConPagos(id);
   }
 
+  // ✅ OBTENER CURSO POR ID
+  // Solo ADMIN puede acceder a detalles completos de cualquier curso
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id')
   async getById(@Param('id', ParseIntPipe) id: number) {
     return this.coursesService.findById(id);
+  }
+
+  // 🔒 MÉTODO PRIVADO PARA FILTRAR DATOS SENSIBLES EN RESPUESTAS PÚBLICAS
+  private filterPublicCourseData(courses: any[]) {
+    return courses.map(course => {
+      // Crear objeto filtrado con solo información segura para mostrar públicamente
+      const filteredCourse: any = {
+        id: course.id,
+        titulo: course.titulo,
+        descripcion: course.descripcion,
+        imagen: course.imagen,
+        tipo: course.tipo,
+        cupos: course.cupos,
+        precio: course.precio,
+        fecha: course.fecha,
+        hora: course.hora,
+        activo: course.activo,
+        // ✅ INFORMACIÓN PÚBLICA SEGURA
+      };
+
+      // Filtrar información del profesor - solo datos públicos
+      if (course.profesor) {
+        filteredCourse.profesor = {
+          id: course.profesor.id,
+          nombres: course.profesor.nombres,
+          apellidos: course.profesor.apellidos,
+          asignatura: course.profesor.asignatura
+          // ❌ NO se incluye: correo, usuario, ciudad, empresa, cargo, emailVerified (información sensible)
+        };
+      }
+
+      return filteredCourse;
+    });
   }
 }
