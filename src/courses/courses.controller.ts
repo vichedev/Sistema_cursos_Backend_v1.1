@@ -136,7 +136,7 @@ export class CoursesController {
   @Get('disponibles')
   async disponibles(@Request() req) {
     const userId = req.user.userId;
-    // Retorna cursos con información del estado de inscripción del usuario
+    // Retorna cursos con información del estado de inscripción del usuario Y CUPONES
     return this.coursesService.cursosConEstadoInscrito(userId);
   }
 
@@ -176,7 +176,6 @@ export class CoursesController {
     return this.coursesService.estudiantesCursoConPagos(id);
   }
 
-  // ✅ OBTENER CURSO POR ID
   // Solo ADMIN puede acceder a detalles completos de cualquier curso
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -185,9 +184,23 @@ export class CoursesController {
     return this.coursesService.findById(id);
   }
 
-  // 🔒 MÉTODO PRIVADO PARA FILTRAR DATOS SENSIBLES EN RESPUESTAS PÚBLICAS
   private filterPublicCourseData(courses: any[]) {
     return courses.map(course => {
+      // ✅ CALCULAR CUPONES DISPONIBLES (solo para saber si hay)
+      const cuponesActivos = course.cupones?.filter(cupon =>
+        cupon.activo &&
+        cupon.usosActuales < cupon.usosMaximos &&
+        (!cupon.fechaExpiracion || new Date() < cupon.fechaExpiracion)
+      ) || [];
+
+      // ✅ DEBUG: Verificar cupones en el controlador también
+      if (cuponesActivos.length > 0) {
+        console.log(`🎯 En controlador - Curso "${course.titulo}" tiene ${cuponesActivos.length} cupones activos:`);
+        cuponesActivos.forEach(cupon => {
+          console.log(`   - ${cupon.tipo}: ${cupon.codigo}`);
+        });
+      }
+
       // Crear objeto filtrado con solo información segura para mostrar públicamente
       const filteredCourse: any = {
         id: course.id,
@@ -200,7 +213,8 @@ export class CoursesController {
         fecha: course.fecha,
         hora: course.hora,
         activo: course.activo,
-        // ✅ INFORMACIÓN PÚBLICA SEGURA
+        // ✅ SOLO INDICAR SI HAY CUPONES, SIN CONTADOR
+        tieneCupones: cuponesActivos.length > 0
       };
 
       // Filtrar información del profesor - solo datos públicos
@@ -210,7 +224,6 @@ export class CoursesController {
           nombres: course.profesor.nombres,
           apellidos: course.profesor.apellidos,
           asignatura: course.profesor.asignatura
-          // ❌ NO se incluye: correo, usuario, ciudad, empresa, cargo, emailVerified (información sensible)
         };
       }
 

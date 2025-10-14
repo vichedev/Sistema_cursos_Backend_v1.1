@@ -1,32 +1,36 @@
-// src/payments/payment-attempt.entity.ts
+// payment-attempt.entity.ts - AGREGAR CAMPO
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
-@Entity('payment_attempts') // Nombre de la tabla en tu base de datos
+@Entity('payment_attempts')
 export class PaymentAttempt {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ unique: true }) // Asegura que este ID sea único
-  @Index() // Agregar índice para búsquedas más rápidas
-  clientTransactionId: string; // El UUID que generas y envías a Payphone
+  @Column({ unique: true })
+  @Index()
+  clientTransactionId: string;
 
   @Column()
-  cursoId: number; // El ID del curso asociado al pago
+  cursoId: number;
 
   @Column()
-  userId: number; // El ID del usuario que intenta pagar
+  userId: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 }) // Monto del pago
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
   @Column({ nullable: true })
-  payphoneId: string; // El ID de transacción que Payphone te devuelve (ej. vRGau75DNESLaFf1O3ggQA)
+  payphoneId: string;
 
   @Column({ default: 'PENDIENTE' })
-  status: string; // Ej: 'PENDIENTE', 'Approved', 'Declined', 'ERROR_PROCESAMIENTO_INTERNO', etc.
+  status: string;
 
   @Column({ type: 'text', nullable: true })
-  callbackData: string; // Para almacenar el callback completo de Payphone
+  callbackData: string;
+
+  // ✅ AGREGAR CAMPO PARA RESERVA DE CUPÓN
+  @Column({ nullable: true })
+  cuponReservaId: number;
 
   @CreateDateColumn()
   createdAt: Date;

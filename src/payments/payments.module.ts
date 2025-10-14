@@ -9,13 +9,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { StudentCourse } from '../courses/student-course.entity';
 import { PaymentAttempt } from './payment-attempt.entity';
 import { HttpModule } from '@nestjs/axios';
+// ✅ AGREGAR IMPORT
+import { CouponsModule } from '../coupons/coupons.module';
+import { CouponUsage } from '../coupons/coupon-usage.entity'; // ✅ AGREGAR ESTE IMPORT
 
 @Module({
   imports: [
     CoursesModule,
     UsersModule,
     HttpModule,
-    TypeOrmModule.forFeature([StudentCourse, PaymentAttempt])
+    // ✅ AGREGAR COUPONS MODULE
+    CouponsModule,
+    TypeOrmModule.forFeature([
+      StudentCourse, 
+      PaymentAttempt,
+      CouponUsage // ✅ AGREGAR ESTA ENTIDAD
+    ])
   ],
   controllers: [PaymentsController],
   providers: [PayphoneService, MailService],

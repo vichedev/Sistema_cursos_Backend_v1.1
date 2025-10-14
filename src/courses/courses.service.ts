@@ -1,7 +1,7 @@
 // src/courses/courses.service.ts
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, LessThan, MoreThan } from 'typeorm';
 import { Course } from './course.entity';
 import { StudentCourse } from './student-course.entity';
 import { PaymentAttempt } from '../payments/payment-attempt.entity';
@@ -12,6 +12,9 @@ import axios from 'axios';
 
 // ✅ importar el SERVICE SSE (no controller)
 import { NotificationsSseService } from '../notifications/notifications.sse.service';
+
+// ✅ Importar servicio de cupones
+import { CouponsService } from '../coupons/coupons.service';
 
 @Injectable()
 export class CoursesService {
@@ -26,6 +29,8 @@ export class CoursesService {
     private mail: MailService,
     // ✅ inyecta el servicio SSE
     private readonly sse: NotificationsSseService,
+    // ✅ inyecta el servicio de cupones
+    private readonly couponsService: CouponsService,
   ) { }
 
   // ===============================
@@ -63,12 +68,25 @@ export class CoursesService {
   }
 
   // ===============================
-  // ✅ CREAR CURSO + Notificación en segundo plano
+  // ✅ CREAR CURSO + Notificación en segundo plano + CUPONES
   // ===============================
   async create(data: any) {
     // ✅ Asegurar que la fecha se guarde en formato correcto
     if (data.fecha) {
       data.fecha = this.formatDateOnly(data.fecha);
+    }
+
+    // ✅ Extraer cupones del data si existen
+    let cuponesData = [];
+    if (data.cupones) {
+      try {
+        cuponesData = typeof data.cupones === 'string'
+          ? JSON.parse(data.cupones)
+          : data.cupones;
+        delete data.cupones; // Remover del data principal
+      } catch (error) {
+        this.logger.error('Error parseando cupones:', error);
+      }
     }
 
     const course = this.repo.create(data);
@@ -87,6 +105,51 @@ export class CoursesService {
       throw new Error('Error al guardar el curso: formato inesperado');
     }
 
+    // ✅ CREAR CUPONES ASOCIADOS AL CURSO
+    if (cuponesData.length > 0) {
+      try {
+
+        for (const cuponItem of cuponesData) {
+          try {
+            // ✅ VERIFICACIÓN DE TIPO SEGURA
+            if (cuponItem &&
+              typeof cuponItem === 'object' &&
+              'codigo' in cuponItem &&
+              'tipo' in cuponItem &&
+              'usosMaximos' in cuponItem) {
+
+              const cuponData = cuponItem as {
+                codigo: string;
+                tipo: string;
+                usosMaximos: number;
+                fechaExpiracion?: string;
+              };
+
+              const cuponCreado = await this.couponsService.createCoupon({
+                codigo: cuponData.codigo,
+                tipo: cuponData.tipo as any,
+                usosMaximos: cuponData.usosMaximos,
+                fechaExpiracion: cuponData.fechaExpiracion,
+                cursoId: courseId
+              });
+
+              // ✅ ACCEDER AL ID DE FORMA SEGURA
+              const cuponId = (cuponCreado as any).id || 'N/A';
+
+            } else {
+              console.warn('❌ Datos de cupón inválidos:', cuponItem);
+            }
+          } catch (cuponError) {
+            console.error('❌ Error creando cupón individual:', cuponError);
+            // Continuar con el siguiente cupón
+          }
+        }
+        this.logger.log(`✅ ${cuponesData.length} cupones procesados para el curso ${courseId}`);
+      } catch (error) {
+        this.logger.error('Error en proceso de creación de cupones:', error);
+      }
+    }
+
     const notificarCorreo = data.notificarCorreo === 'true' || data.notificarCorreo === true;
     const notificarWhatsapp = data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
 
@@ -99,6 +162,49 @@ export class CoursesService {
     }
 
     return this.findById(courseId);
+  }
+
+  // ===============================
+  // ✅ MÉTODO PARA OBTENER CURSO CON CUPONES
+  // ===============================
+  async findByIdWithCoupons(id: number) {
+    const course = await this.findById(id);
+    if (!course) {
+      throw new NotFoundException('Curso no encontrado');
+    }
+
+    // Obtener cupones del curso
+    const cupones = await this.couponsService.getCouponsByCourse(id);
+
+    return {
+      ...course,
+      cupones
+    };
+  }
+
+  // ===============================
+  // ✅ MÉTODO PARA VALIDAR Y APLICAR CUPÓN
+  // ===============================
+  async validateAndApplyCoupon(cursoId: number, codigoCupon: string, userId: number) {
+    try {
+      const result = await this.couponsService.validateAndApplyCoupon(
+        cursoId,
+        codigoCupon,
+        userId
+      );
+
+      return result;
+    } catch (error) {
+      this.logger.error(`Error aplicando cupón: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ===============================
+  // ✅ MÉTODO PARA OBTENER ESTADÍSTICAS DE CUPONES DEL CURSO
+  // ===============================
+  async getCouponStats(cursoId: number) {
+    return this.couponsService.getCouponStatsByCourse(cursoId);
   }
 
   // ===============================
@@ -298,11 +404,11 @@ ${frontendUrl}
     }
   }
 
-
   findAll() {
     return this.repo
       .createQueryBuilder('course')
       .leftJoinAndSelect('course.profesor', 'profesor')
+      // ❌ QUITAR: .leftJoinAndSelect('course.cupones', 'cupones')
       .select([
         'course.id',
         'course.titulo',
@@ -317,21 +423,19 @@ ${frontendUrl}
         'course.activo',
         'course.createdAt',
         'course.updatedAt',
-        // ✅ SOLO CAMPOS SEGUROS del profesor
         'profesor.id',
         'profesor.nombres',
         'profesor.apellidos',
-        'profesor.asignatura'
+        'profesor.asignatura',
+        // ❌ QUITAR 'cupones'
       ])
       .where('course.activo = :activo', { activo: true })
       .getMany();
   }
-
-
   findById(id: number) {
     return this.repo.findOne({
       where: { id },
-      relations: ['profesor'],
+      relations: ['profesor'], // ❌ QUITAR 'cupones'
       select: {
         id: true,
         titulo: true,
@@ -351,8 +455,8 @@ ${frontendUrl}
           nombres: true,
           apellidos: true,
           asignatura: true
-          // ❌ NO incluir datos sensibles
-        }
+        },
+        // ❌ QUITAR toda la sección de cupones
       }
     });
   }
@@ -389,12 +493,9 @@ ${frontendUrl}
       where: { estudianteId: userId }
     });
 
-
-
     const cursosIds = inscritos.map((x) => x.cursoId);
 
     if (!cursosIds.length) {
-
       return [];
     }
 
@@ -412,7 +513,7 @@ ${frontendUrl}
         'course.precio',
         'course.fecha',
         'course.hora',
-        'course.activo', // ✅ Incluir campo activo
+        'course.activo',
         'course.createdAt',
         'course.updatedAt',
         'profesor.id',
@@ -421,11 +522,7 @@ ${frontendUrl}
         'profesor.asignatura'
       ])
       .where('course.id IN (:...cursosIds)', { cursosIds })
-      // ❌ QUITAR este filtro para mostrar también cursos inactivos:
-      // .andWhere('course.activo = :activo', { activo: true })
       .getMany();
-
-
 
     return cursos.map((curso) => ({
       ...curso,
@@ -465,10 +562,11 @@ ${frontendUrl}
   }
 
   async cursosConEstadoInscrito(userId: number) {
-    // Usar queryBuilder para control exacto de los datos
+    // ❌ ELIMINAR la relación con cupones de la consulta principal
     const cursos = await this.repo
       .createQueryBuilder('course')
       .leftJoinAndSelect('course.profesor', 'profesor')
+      // ❌ QUITAR: .leftJoinAndSelect('course.cupones', 'cupones')
       .select([
         'course.id',
         'course.titulo',
@@ -483,17 +581,15 @@ ${frontendUrl}
         'course.activo',
         'course.createdAt',
         'course.updatedAt',
-        // ✅ SOLO CAMPOS SEGUROS del profesor
         'profesor.id',
         'profesor.nombres',
         'profesor.apellidos',
-        'profesor.asignatura'
-        // ❌ NO incluir: correo, usuario, cedula, celular, password, etc.
+        'profesor.asignatura',
+        // ❌ QUITAR todos los campos de cupones
       ])
       .where('course.activo = :activo', { activo: true })
       .getMany();
 
-    // ... el resto del método igual
     const inscritos = await this.studentCourseRepo.find({
       where: { estudianteId: userId }
     });
@@ -507,6 +603,22 @@ ${frontendUrl}
 
     const inscritosIds = inscritos.map((x) => x.cursoId);
     const cursosPagadosIds = pagosAprobados.map((p) => p.cursoId);
+
+    // ✅ CONSULTA SEPARADA PARA CUPONES (no se envía al frontend)
+    const cursosConCupones = await this.repo
+      .createQueryBuilder('course')
+      .leftJoinAndSelect('course.cupones', 'cupones')
+      .select([
+        'course.id',
+        'cupones.id',
+        'cupones.tipo',
+        'cupones.activo',
+        'cupones.usosActuales',
+        'cupones.usosMaximos',
+        'cupones.fechaExpiracion'
+      ])
+      .where('course.activo = :activo', { activo: true })
+      .getMany();
 
     return cursos.map((curso) => {
       const estaInscrito = inscritosIds.includes(curso.id);
@@ -523,6 +635,15 @@ ${frontendUrl}
         puedeVerLink = true;
       }
 
+      // ✅ BUSCAR LOS CUPONES DEL CURSO ACTUAL EN LA CONSULTA SEPARADA
+      const cursoConCupones = cursosConCupones.find(c => c.id === curso.id);
+      const tieneCupones = cursoConCupones?.cupones?.some(cupon => {
+        const activo = cupon.activo !== false;
+        const usosDisponibles = cupon.usosActuales < cupon.usosMaximos;
+        const noExpirado = !cupon.fechaExpiracion || new Date() < new Date(cupon.fechaExpiracion);
+        return activo && usosDisponibles && noExpirado;
+      }) || false;
+
       return {
         ...curso,
         link: linkAMostrar,
@@ -533,6 +654,8 @@ ${frontendUrl}
           ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
           : null,
         asignatura: curso.profesor ? curso.profesor.asignatura : null,
+        tieneCupones: tieneCupones, // ✅ SOLO EL BOOLEANO
+        // ❌ NO incluir la propiedad 'cupones'
       };
     });
   }

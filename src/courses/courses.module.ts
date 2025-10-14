@@ -1,4 +1,3 @@
-// src/courses/courses.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
@@ -13,15 +12,18 @@ import { CoursesService } from './courses.service';
 import { CoursesController } from './courses.controller';
 import { UsersModule } from '../users/users.module';
 import { CommonModule } from '../common/common.module';
-// ⬇️ IMPORTA el módulo de notificaciones (debe exportar el service)
 import { NotificationsModule } from '../notifications/notifications.module';
+// ✅ Importar módulo de cupones
+import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Course, StudentCourse, PaymentAttempt, User]),
     UsersModule,
     CommonModule,
-    NotificationsModule,                // ⬅️ AQUI EL IMPORT FALTANTE
+    NotificationsModule,
+    // ✅ Agregar módulo de cupones
+    CouponsModule,
     MulterModule.register({
       storage: diskStorage({
         destination: join(__dirname, '..', '..', 'uploads'),

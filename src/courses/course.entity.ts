@@ -2,6 +2,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { StudentCourse } from './student-course.entity';
 import { User } from '../users/user.entity';
+import { Coupon } from '../coupons/coupon.entity'; // ✅ AGREGAR ESTA IMPORT
 
 export type TipoCurso = 'ONLINE_GRATIS' | 'ONLINE_PAGADO' | 'PRESENCIAL_GRATIS' | 'PRESENCIAL_PAGADO';
 
@@ -40,7 +41,7 @@ export class Course {
   // Relación ManyToOne hacia User (profesor) - AGREGAR onDelete
   @ManyToOne(() => User, (user) => user.cursosDictados, { 
     nullable: true,
-    onDelete: 'SET NULL' // ✅ AGREGAR ESTO - Los cursos quedan sin profesor
+    onDelete: 'SET NULL'
   })
   @JoinColumn({ name: 'profesorId' })
   profesor: User;
@@ -54,11 +55,13 @@ export class Course {
   @OneToMany(() => StudentCourse, (studentCourse) => studentCourse.curso)
   studentCourses: StudentCourse[];
 
-  // ✅ NUEVO: Campo para fecha de creación
+  // ✅ AGREGAR RELACIÓN CON CUPONES
+  @OneToMany(() => Coupon, (coupon) => coupon.curso)
+  cupones: Coupon[];
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  // ✅ NUEVO: Campo para fecha de actualización
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }
