@@ -1,18 +1,18 @@
 FROM node:20-alpine
 
-# Instalar tzdata y configurar zona horaria
+# Instalar tzdata
 RUN apk add --no-cache tzdata
 ENV TZ=America/Guayaquil
 
-# Usar UID 1001 y GID 1001 (sin conflictos)
+# IDs de usuario
 ARG USER_ID=1001
 ARG GROUP_ID=1001
 
-# Crear usuario con IDs que no existen
+# Crear usuario no-root
 RUN addgroup -g $GROUP_ID -S nodejs && \
     adduser -S nestjs -u $USER_ID -G nodejs
 
-# Crear directorio de la app
+# Directorio de la app
 WORKDIR /app
 
 # Copiar archivos de configuración
@@ -30,7 +30,8 @@ COPY . .
 RUN npm run build
 
 # Crear directorios necesarios
-RUN mkdir -p uploads public
+RUN mkdir -p uploads public && \
+    chown -R nestjs:nodejs /app
 
 # Cambiar al usuario no-root
 USER nestjs

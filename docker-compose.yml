@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -6,7 +8,7 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      TZ: America/Guayaquil  # ← Agregar esta línea
+      TZ: America/Guayaquil
     ports:
       - "5432:5432"
     volumes:
@@ -14,6 +16,11 @@ services:
     networks:
       - cursos_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: .
@@ -24,30 +31,37 @@ services:
       - ./uploads:/app/uploads:rw
       - ./public:/app/public:ro
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - cursos_network
     restart: unless-stopped
     environment:
       - DB_HOST=postgres
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
       - NODE_ENV=production
-      - TZ=America/Guayaquil  # ← Agregar esta línea
+      - TZ=America/Guayaquil
 
   nginx:
     image: nginx:alpine
     container_name: cursos_nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx-complete.conf:/etc/nginx/nginx.conf
-      - ./public:/usr/share/nginx/html
+      - ./nginx-complete.conf:/etc/nginx/nginx.conf:ro
+      - ./public:/usr/share/nginx/html:ro
+      - /etc/letsencrypt:/etc/nginx/certs:ro
     depends_on:
       - backend
     networks:
       - cursos_network
     restart: unless-stopped
     environment:
-      - TZ=America/Guayaquil  # ← Agregar esta línea
+      - NGINX_DOMAIN=${NGINX_DOMAIN}
+      - TZ=America/Guayaquil
 
 volumes:
   postgres_data:
