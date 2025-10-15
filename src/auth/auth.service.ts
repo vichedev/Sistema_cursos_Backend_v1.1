@@ -53,7 +53,7 @@ export class AuthService {
       );
     } catch (error) {
       console.error('Error enviando correo de verificación:', error);
-      // Opcional: podrías eliminar al usuario si no se puede enviar el correo
+      
     }
 
     return { 

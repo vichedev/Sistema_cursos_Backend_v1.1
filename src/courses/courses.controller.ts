@@ -13,6 +13,7 @@ import {
   ParseIntPipe,
   Query,
   BadRequestException,
+  Patch // ✅ IMPORT AGREGADO
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -195,9 +196,7 @@ export class CoursesController {
 
       // ✅ DEBUG: Verificar cupones en el controlador también
       if (cuponesActivos.length > 0) {
-        console.log(`🎯 En controlador - Curso "${course.titulo}" tiene ${cuponesActivos.length} cupones activos:`);
         cuponesActivos.forEach(cupon => {
-          console.log(`   - ${cupon.tipo}: ${cupon.codigo}`);
         });
       }
 
@@ -230,4 +229,52 @@ export class CoursesController {
       return filteredCourse;
     });
   }
+
+
+  // ✅ OBTENER CURSOS INACTIVOS (ELIMINADOS/ARCHIVADOS)
+  // Solo ADMIN puede ver cursos inactivos
+  // En el método getCursosInactivos
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('admin/inactivos')
+  async getCursosInactivos() {
+  
+    try {
+      const courses = await this.coursesService.findInactiveCourses();
+      const filtered = this.filterPublicCourseData(courses);
+      return filtered;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // ✅ OBTENER TODOS LOS CURSOS (ACTIVOS E INACTIVOS) PARA ADMIN
+  // Solo ADMIN puede ver todos los cursos sin filtrar
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('admin/todos')
+  async getAllCoursesForAdmin() {
+    const courses = await this.coursesService.findAllForAdmin();
+    // Filtrar datos sensibles antes de retornar
+    return this.filterPublicCourseData(courses);
+  }
+
+  // ✅ ACTIVAR CURSO (RESTAURAR)
+  // Solo ADMIN puede restaurar cursos
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Patch(':id/activate')
+  async activateCourse(@Param('id', ParseIntPipe) id: number) {
+    return this.coursesService.activateCourse(id);
+  }
+
+  // ✅ DESACTIVAR CURSO (ARCHIVAR/ELIMINAR LÓGICAMENTE)
+  // Solo ADMIN puede archivar cursos
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Patch(':id/deactivate')
+  async deactivateCourse(@Param('id', ParseIntPipe) id: number) {
+    return this.coursesService.softDeleteCourse(id);
+  }
+
 }

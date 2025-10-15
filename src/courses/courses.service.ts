@@ -432,6 +432,7 @@ ${frontendUrl}
       .where('course.activo = :activo', { activo: true })
       .getMany();
   }
+
   findById(id: number) {
     return this.repo.findOne({
       where: { id },
@@ -465,6 +466,7 @@ ${frontendUrl}
     await this.repo.update(courseId, { cupos: nuevoCupo });
   }
 
+  // Update cursos con manejo de cupones
   async update(id: number, data: Partial<Course>) {
     const course = await this.findById(id);
     if (!course) throw new NotFoundException('Curso no encontrado');
@@ -474,20 +476,104 @@ ${frontendUrl}
       data.fecha = this.formatDateOnly(data.fecha);
     }
 
+    // ✅ Extraer cupones del data si existen
+    let cuponesData = [];
+    if (data.cupones) {
+      try {
+        cuponesData = typeof data.cupones === 'string'
+          ? JSON.parse(data.cupones)
+          : data.cupones;
+        delete data.cupones; // Remover del data principal
+      } catch (error) {
+        this.logger.error('Error parseando cupones:', error);
+      }
+    }
+
     await this.repo.update(id, data);
+
+    // ✅ ACTUALIZACIÓN INTELIGENTE DE CUPONES
+    if (cuponesData.length >= 0) { // Incluye cuando es array vacío (eliminar todos)
+      await this.syncCouponsForCourse(id, cuponesData);
+    }
+
     return this.findById(id);
+  }
+
+  // 🆕 MÉTODO PARA SINCRONIZACIÓN INTELIGENTE DE CUPONES
+  private async syncCouponsForCourse(cursoId: number, nuevosCupones: any[]) {
+    try {
+      // Obtener cupones actuales del curso
+      const cuponesActuales = await this.couponsService.getCouponsByCourse(cursoId);
+
+      // Crear mapas para comparación eficiente
+      const mapaActuales = new Map(cuponesActuales.map(c => [c.id, c]));
+      const mapaNuevos = new Map(nuevosCupones.filter(c => c.id).map(c => [c.id, c]));
+      const nuevosSinId = nuevosCupones.filter(c => !c.id);
+
+      // Identificar cupones a eliminar (están en actuales pero no en nuevos)
+      const cuponesAEliminar = cuponesActuales.filter(cupónActual =>
+        !mapaNuevos.has(cupónActual.id)
+      );
+
+      // Identificar cupones a actualizar (están en ambos)
+      const cuponesAActualizar = nuevosCupones.filter(cupónNuevo =>
+        cupónNuevo.id && mapaActuales.has(cupónNuevo.id)
+      );
+
+      // Procesar eliminaciones
+      for (const cupon of cuponesAEliminar) {
+        await this.couponsService.deleteCoupon(cupon.id);
+        this.logger.log(`🗑️ Cupón eliminado: ${cupon.codigo} (ID: ${cupon.id})`);
+      }
+
+      // Procesar actualizaciones
+      for (const cuponData of cuponesAActualizar) {
+        await this.couponsService.updateCoupon(cuponData.id, {
+          codigo: cuponData.codigo,
+          tipo: cuponData.tipo,
+          usosMaximos: cuponData.usosMaximos,
+          fechaExpiracion: cuponData.fechaExpiracion
+        });
+        this.logger.log(`✏️ Cupón actualizado: ${cuponData.codigo} (ID: ${cuponData.id})`);
+      }
+
+      // Procesar nuevas creaciones
+      for (const cuponData of nuevosSinId) {
+        const cuponCreado = await this.couponsService.createCoupon({
+          ...cuponData,
+          cursoId: cursoId
+        });
+        this.logger.log(`🆕 Cupón creado: ${cuponData.codigo} (ID: ${(cuponCreado as any).id})`);
+      }
+
+      this.logger.log(`✅ Sincronización completada: ${cuponesAEliminar.length} eliminados, ${cuponesAActualizar.length} actualizados, ${nuevosSinId.length} creados para el curso ${cursoId}`);
+
+    } catch (error) {
+      this.logger.error(`❌ Error en sincronización de cupones para curso ${cursoId}:`, error);
+      throw error;
+    }
   }
 
   async findUserById(id: number) {
     return this.usersService.findById(id);
   }
 
+  // ===============================
+  // ✅ MODIFICAR softDeleteCourse PARA INCLUIR DESACTIVACIÓN DE CUPONES
+  // ===============================
   async softDeleteCourse(id: number) {
+    const course = await this.findById(id);
+    if (!course) throw new NotFoundException('Curso no encontrado');
+
+    // Desactivar cupones antes de archivar el curso
+    await this.deactivateCouponsOnCourseArchive(id);
+
     const result = await this.repo.update(id, { activo: false });
     if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
+
+    this.logger.log(`✅ Curso ${id} archivado y cupones desactivados`);
     return { success: true };
   }
-
   async misCursos(userId: number) {
     const inscritos = await this.studentCourseRepo.find({
       where: { estudianteId: userId }
@@ -685,4 +771,120 @@ ${frontendUrl}
 
     return { estudiantes: estudiantesConPagos };
   }
+
+  // En el CoursesService, agrega estos nuevos métodos:
+
+  async findInactiveCourses() {
+    try {
+      const result = await this.repo
+        .createQueryBuilder('course')
+        .leftJoinAndSelect('course.profesor', 'profesor')
+        .select([
+          'course.id',
+          'course.titulo',
+          'course.descripcion',
+          'course.imagen',
+          'course.tipo',
+          'course.cupos',
+          'course.link',
+          'course.precio',
+          'course.fecha',
+          'course.hora',
+          'course.activo',
+          'course.createdAt',
+          'course.updatedAt',
+          'profesor.id',
+          'profesor.nombres',
+          'profesor.apellidos',
+          'profesor.asignatura',
+        ])
+        .where('course.activo = :activo', { activo: false })
+        .orderBy('course.updatedAt', 'DESC')
+        .getMany();
+        
+      return result;
+    } catch (error) {
+      console.error('❌ [SERVICE] Error en findInactiveCourses:', error);
+      throw error;
+    }
+  }
+
+  // ===============================
+  // ✅ OBTENER TODOS LOS CURSOS (ACTIVOS E INACTIVOS) PARA ADMIN
+  // ===============================
+  async findAllForAdmin() {
+    return this.repo
+      .createQueryBuilder('course')
+      .leftJoinAndSelect('course.profesor', 'profesor')
+      .select([
+        'course.id',
+        'course.titulo',
+        'course.descripcion',
+        'course.imagen',
+        'course.tipo',
+        'course.cupos',
+        'course.link',
+        'course.precio',
+        'course.fecha',
+        'course.hora',
+        'course.activo',
+        'course.createdAt',
+        'course.updatedAt',
+        'profesor.id',
+        'profesor.nombres',
+        'profesor.apellidos',
+        'profesor.asignatura',
+      ])
+      .orderBy('course.activo', 'DESC') // Primero los activos, luego los inactivos
+      .addOrderBy('course.updatedAt', 'DESC')
+      .getMany();
+  }
+
+  // ===============================
+  // ✅ MODIFICAR activateCourse PARA INCLUIR ACTIVACIÓN DE CUPONES
+  // ===============================
+  async activateCourse(id: number) {
+    const course = await this.findById(id);
+    if (!course) throw new NotFoundException('Curso no encontrado');
+
+    const result = await this.repo.update(id, { activo: true });
+    if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
+
+    // Activar cupones al restaurar el curso
+    await this.activateCouponsOnCourseRestore(id);
+
+    this.logger.log(`✅ Curso ${id} activado y cupones reactivados`);
+    return { success: true, message: 'Curso activado correctamente' };
+  }
+
+
+  // ===============================
+  // ✅ DESACTIVAR CUPONES AL ARCHIVAR CURSO
+  // ===============================
+  async deactivateCouponsOnCourseArchive(cursoId: number) {
+    try {
+      const result = await this.couponsService.deactivateAllCouponsByCourse(cursoId);
+      this.logger.log(`✅ Cupones desactivados para curso ${cursoId}: ${result.affected} cupones`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Error desactivando cupones del curso ${cursoId}:`, error);
+      throw error;
+    }
+  }
+
+  // ===============================
+  // ✅ ACTIVAR CUPONES AL DESARCHIVAR CURSO
+  // ===============================
+  async activateCouponsOnCourseRestore(cursoId: number) {
+    try {
+      const result = await this.couponsService.activateAllCouponsByCourse(cursoId);
+      this.logger.log(`✅ Cupones activados para curso ${cursoId}: ${result.affected} cupones`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Error activando cupones del curso ${cursoId}:`, error);
+      throw error;
+    }
+  }
+
+
 }

@@ -665,4 +665,90 @@ export class CouponsService {
     };
   }
 
+
+  // En coupons.service.ts - Agregar después del método forceReleaseCoupon
+
+  // ===============================
+  // ✅ DESACTIVAR TODOS LOS CUPONES DE UN CURSO
+  // ===============================
+  async deactivateAllCouponsByCourse(cursoId: number) {
+    try {
+      const result = await this.couponRepo
+        .createQueryBuilder('coupon')
+        .update()
+        .set({ activo: false })
+        .where('cursoId = :cursoId', { cursoId })
+        .andWhere('activo = :activo', { activo: true })
+        .execute();
+
+      this.logger.log(`🔒 ${result.affected} cupones desactivados para el curso ${cursoId}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Error desactivando cupones del curso ${cursoId}:`, error);
+      throw error;
+    }
+  }
+
+  // ===============================
+  // ✅ ACTIVAR TODOS LOS CUPONES DE UN CURSO
+  // ===============================
+  async activateAllCouponsByCourse(cursoId: number) {
+    try {
+      const result = await this.couponRepo
+        .createQueryBuilder('coupon')
+        .update()
+        .set({ activo: true })
+        .where('cursoId = :cursoId', { cursoId })
+        .andWhere('activo = :activo', { activo: false })
+        .execute();
+
+      this.logger.log(`🔓 ${result.affected} cupones activados para el curso ${cursoId}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Error activando cupones del curso ${cursoId}:`, error);
+      throw error;
+    }
+  }
+
+  // ===============================
+  // ✅ OBTENER ESTADO DE CUPONES POR CURSO
+  // ===============================
+  async getCouponsStatusByCourse(cursoId: number) {
+    const cupones = await this.couponRepo.find({
+      where: { cursoId }
+    });
+
+    return {
+      total: cupones.length,
+      activos: cupones.filter(c => c.activo).length,
+      inactivos: cupones.filter(c => !c.activo).length,
+      cupones: cupones.map(c => ({
+        id: c.id,
+        codigo: c.codigo,
+        tipo: c.tipo,
+        activo: c.activo,
+        usosActuales: c.usosActuales,
+        usosMaximos: c.usosMaximos
+      }))
+    };
+  }
+// Editar cursos y ekiminar cupones al borrar curso
+  async deleteAllCouponsByCourse(cursoId: number) {
+    try {
+      // Primero eliminar los usos de cupones
+      const cupones = await this.couponRepo.find({ where: { cursoId } });
+      for (const cupon of cupones) {
+        await this.couponUsageRepo.delete({ couponId: cupon.id });
+      }
+
+      // Luego eliminar los cupones
+      const result = await this.couponRepo.delete({ cursoId });
+      this.logger.log(`🗑️ ${result.affected} cupones eliminados del curso ${cursoId}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Error eliminando cupones del curso ${cursoId}:`, error);
+      throw error;
+    }
+  }
+
 }

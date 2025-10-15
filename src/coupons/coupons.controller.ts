@@ -209,4 +209,44 @@ export class CouponsController {
     }
   }
 
+
+  // ===============================
+  // ✅ OBTENER ESTADO DE CUPONES POR CURSO (ADMIN)
+  // ===============================
+  @Roles('ADMIN')
+  @Get('course/:cursoId/status')
+  async getCouponsStatusByCourse(@Param('cursoId') cursoId: number) {
+    try {
+      return await this.couponsService.getCouponsStatusByCourse(cursoId);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  // ===============================
+  // ✅ DESACTIVAR CUPONES POR CURSO (ADMIN)
+  // ===============================
+  @Roles('ADMIN')
+  @Put('course/:cursoId/deactivate-all')
+  async deactivateAllCouponsByCourse(@Param('cursoId') cursoId: number) {
+    try {
+      return await this.couponsService.deactivateAllCouponsByCourse(cursoId);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  // ===============================
+  // ✅ ACTIVAR CUPONES POR CURSO (ADMIN)
+  // ===============================
+  @Roles('ADMIN')
+  @Put('course/:cursoId/activate-all')
+  async activateAllCouponsByCourse(@Param('cursoId') cursoId: number) {
+    try {
+      return await this.couponsService.activateAllCouponsByCourse(cursoId);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
 }
