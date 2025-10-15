@@ -4,24 +4,22 @@ FROM node:20-alpine
 RUN apk add --no-cache tzdata
 ENV TZ=America/Guayaquil
 
-# IDs de usuario
+# Crear usuario y grupo primero
 ARG USER_ID=1001
 ARG GROUP_ID=1001
-
-# Crear usuario y grupo ANTES de crear directorios
 RUN addgroup -g $GROUP_ID -S nodejs && \
     adduser -S nestjs -u $USER_ID -G nodejs
 
-# Directorio de la app (con permisos correctos desde el inicio)
+# Crear directorio con permisos correctos desde el inicio
 RUN mkdir -p /app && chown -R nestjs:nodejs /app
 WORKDIR /app
 
-# Copiar archivos de configuración
+# Copiar archivos con permisos correctos
 COPY --chown=nestjs:nodejs package*.json ./
 COPY --chown=nestjs:nodejs tsconfig*.json ./
 COPY --chown=nestjs:nodejs nest-cli.json ./
 
-# Instalar dependencias como nestjs (menos lento)
+# Instalar dependencias como usuario nestjs
 USER nestjs
 RUN npm ci
 
@@ -31,7 +29,7 @@ COPY --chown=nestjs:nodejs . .
 # Compilar la aplicación
 RUN npm run build
 
-# Crear directorios de uploads y public
+# Crear directorios necesarios
 RUN mkdir -p uploads public
 
 # Exponer puerto

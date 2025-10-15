@@ -49,11 +49,9 @@ services:
     container_name: cursos_nginx
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx-complete.conf:/etc/nginx/nginx.conf:ro
       - ./public:/usr/share/nginx/html:ro
-      - /etc/letsencrypt:/etc/nginx/certs:ro
     depends_on:
       - backend
     networks:
