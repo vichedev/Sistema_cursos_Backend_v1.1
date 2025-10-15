@@ -8,33 +8,31 @@ ENV TZ=America/Guayaquil
 ARG USER_ID=1001
 ARG GROUP_ID=1001
 
-# Crear usuario no-root
+# Crear usuario y grupo ANTES de crear directorios
 RUN addgroup -g $GROUP_ID -S nodejs && \
     adduser -S nestjs -u $USER_ID -G nodejs
 
-# Directorio de la app
+# Directorio de la app (con permisos correctos desde el inicio)
+RUN mkdir -p /app && chown -R nestjs:nodejs /app
 WORKDIR /app
 
 # Copiar archivos de configuración
-COPY package*.json ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
+COPY --chown=nestjs:nodejs package*.json ./
+COPY --chown=nestjs:nodejs tsconfig*.json ./
+COPY --chown=nestjs:nodejs nest-cli.json ./
 
-# Instalar dependencias
+# Instalar dependencias como nestjs (menos lento)
+USER nestjs
 RUN npm ci
 
 # Copiar código fuente
-COPY . .
+COPY --chown=nestjs:nodejs . .
 
 # Compilar la aplicación
 RUN npm run build
 
-# Crear directorios necesarios
-RUN mkdir -p uploads public && \
-    chown -R nestjs:nodejs /app
-
-# Cambiar al usuario no-root
-USER nestjs
+# Crear directorios de uploads y public
+RUN mkdir -p uploads public
 
 # Exponer puerto
 EXPOSE 3001
