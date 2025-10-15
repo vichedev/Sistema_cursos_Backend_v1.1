@@ -453,8 +453,8 @@ install_or_update_system() {
         echo -e "${GREEN}✅ SISTEMA INSTALADO CORRECTAMENTE${NC}"
     fi
     
-    echo "🌐 URL: https://moviesplus.xyz"
-    echo "👤 Admin: admin / admin1234"
+    echo "🌐 URL: https://cursos.maat.ec"
+    echo "👤 Admin: admin / admin"
     
     # Limpiar .env al final
     cleanup_environment
@@ -535,8 +535,8 @@ show_status() {
     fi
     
     echo -e "${YELLOW}🔗 URLs:${NC}"
-    echo "🌐 Frontend: https://moviesplus.xyz"
-    echo "🔧 Backend API: https://moviesplus.xyz/api"
+    echo "🌐 Frontend: https://cursos.maat.ec"
+    echo "🔧 Backend API: https://cursos.maat.ec/api"
     
     # Mostrar espacio de Docker
     echo -e "${YELLOW}💾 Espacio Docker:${NC}"
