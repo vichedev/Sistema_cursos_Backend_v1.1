@@ -5,7 +5,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
 
-
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
@@ -90,21 +89,23 @@ async function bootstrap() {
 
     logger.log('🔒 Validation Pipe activado - Protección contra SQL Injection y XSS');
 
-    // ✅ Servir archivos estáticos
-    if (process.env.NODE_ENV === 'production') {
+    // ✅ Servir archivos estáticos (SOLO para desarrollo o si se necesitan)
+    // En producción, Nginx se encarga de servir archivos estáticos
+    if (process.env.NODE_ENV === 'development') {
       app.useStaticAssets(join(__dirname, '..', 'public'), {
         prefix: '/',
+        index: false, // No servir index.html automáticamente
       });
-      logger.log('📁 Serviendo archivos estáticos desde carpeta /public');
+      logger.log('🔧 Desarrollo - Serviendo archivos estáticos desde /public');
     }
 
-    // Servir carpeta uploads para imágenes
+    // Servir carpeta uploads para imágenes (SIEMPRE necesario)
     app.useStaticAssets(join(__dirname, '..', 'uploads'), {
       prefix: '/uploads/',
     });
     logger.log('📁 Serviendo archivos multimedia desde /uploads');
 
-    // 🔧 Configuración global
+    // 🔧 Configuración global de API
     app.setGlobalPrefix('api');
     logger.log('🌍 Prefijo global configurado: /api');
 
@@ -131,6 +132,7 @@ async function bootstrap() {
     logger.log(`📱 WhatsApp: ${process.env.WHATSAPP_API_TOKEN ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
     logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅' : 'NO CONFIGURADA'}`);
     logger.log(`🌍 CORS: ${allowedOrigins.length} dominios permitidos`);
+    logger.log(`🎯 SPA: Manejo delegado a Nginx`);
     logger.log('='.repeat(60));
 
   } catch (error) {
