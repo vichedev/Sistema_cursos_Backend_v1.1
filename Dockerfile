@@ -1,36 +1,39 @@
 FROM node:20-alpine
 
-# Instalar tzdata
+# Instalar tzdata y configurar zona horaria
 RUN apk add --no-cache tzdata
 ENV TZ=America/Guayaquil
 
-# Crear usuario y grupo primero
+# Usar UID 1001 y GID 1001 (sin conflictos)
 ARG USER_ID=1001
 ARG GROUP_ID=1001
+
+# Crear usuario con IDs que no existen
 RUN addgroup -g $GROUP_ID -S nodejs && \
     adduser -S nestjs -u $USER_ID -G nodejs
 
-# Crear directorio con permisos correctos desde el inicio
-RUN mkdir -p /app && chown -R nestjs:nodejs /app
+# Crear directorio de la app
 WORKDIR /app
 
-# Copiar archivos con permisos correctos
-COPY --chown=nestjs:nodejs package*.json ./
-COPY --chown=nestjs:nodejs tsconfig*.json ./
-COPY --chown=nestjs:nodejs nest-cli.json ./
+# Copiar archivos de configuración
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
 
-# Instalar dependencias como usuario nestjs
-USER nestjs
+# Instalar dependencias
 RUN npm ci
 
 # Copiar código fuente
-COPY --chown=nestjs:nodejs . .
+COPY . .
 
 # Compilar la aplicación
 RUN npm run build
 
 # Crear directorios necesarios
 RUN mkdir -p uploads public
+
+# Cambiar al usuario no-root
+USER nestjs
 
 # Exponer puerto
 EXPOSE 3001
