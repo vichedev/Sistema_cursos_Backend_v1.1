@@ -38,7 +38,7 @@ export class UsersService {
     return this.repo.findOne({ where: { celular } });
   }
 
-  async create(data: Partial<User> | CreateUserDto) { 
+  async create(data: Partial<User> | CreateUserDto) {
     // Validar campos obligatorios
     if (!data.correo || !data.usuario || !data.cedula) {
       throw new BadRequestException('Correo, usuario y cédula son campos obligatorios');
@@ -143,12 +143,43 @@ export class UsersService {
     return this.findById(id);
   }
 
-  async delete(id: number) {
+  
+  async delete(id: number): Promise<{ success: boolean; message: string }> {
     if (id === 1) {
       throw new BadRequestException('No se puede eliminar el administrador principal del sistema');
     }
 
-    return this.repo.delete(id);
+    try {
+      const result = await this.repo.delete(id);
+
+      if (result.affected === 0) {
+        return {
+          success: false,
+          message: 'Usuario no encontrado'
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Estudiante eliminado correctamente'
+      };
+
+    } catch (error) {
+      // Manejar error de violación de clave foránea
+      if (error.code === '23503') {
+        return {
+          success: false,
+          message: 'No se puede eliminar el estudiante porque tiene cursos, cupones u otra información asociada. Primero elimine los registros relacionados.'
+        };
+      }
+
+      // Para otros errores de base de datos
+      console.error('❌ Error al eliminar usuario:', error);
+      return {
+        success: false,
+        message: 'Error interno del servidor al intentar eliminar el estudiante'
+      };
+    }
   }
 
   async getAll() {
@@ -210,7 +241,7 @@ export class UsersService {
       where: { rol: 'ESTUDIANTE', activo: true },
       select: {
         id: true,
-        cedula: true,       
+        cedula: true,
         nombres: true,
         apellidos: true,
         correo: true,

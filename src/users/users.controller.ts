@@ -171,6 +171,17 @@ export class UsersController {
 
   @Delete(':id')
   async deleteUser(@Param('id') id: number) {
-    return this.usersService.delete(id);
+    const result = await this.usersService.delete(id);
+
+    if (!result.success) {
+      // Si es error de relaciones, retornar BadRequest con mensaje específico
+      if (result.message.includes('No se puede eliminar')) {
+        throw new BadRequestException(result.message);
+      }
+      // Para otros errores
+      throw new BadRequestException(result.message);
+    }
+
+    return result;
   }
 }

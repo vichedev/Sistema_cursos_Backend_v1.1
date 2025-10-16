@@ -5,60 +5,74 @@ import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User, Rol } from '../users/user.entity';
-import { MailService } from '../common/mail.service';
+import { MailQueueService } from '../common/mail-queue.service'; // ✅ CAMBIO 1: Importar MailQueueService
 import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService, 
+    private usersService: UsersService,
     private jwtService: JwtService,
-    private mailService: MailService
+    private mailQueueService: MailQueueService // ✅ CAMBIO 2: Reemplazar MailService por MailQueueService
   ) { }
 
   async register(data: RegisterDto) {
-    if (await this.usersService.findByUsuario(data.usuario)) {
-      throw new BadRequestException('Usuario ya existe');
-    }
-    if (await this.usersService.findByCorreo(data.correo)) {
-      throw new BadRequestException('Correo ya existe');
-    }
-    if (await this.usersService.findByCedula(data.cedula)) {
-      throw new BadRequestException('Cédula ya existe');
-    }
+    let user: User;
+    let verificationToken: string;
 
-    const { rol: cargo, ...rest } = data;
-
-    // Generar token de verificación
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-
-    const userData: Partial<User> = {
-      ...rest,
-      password: data.password,
-      rol: 'ESTUDIANTE' as Rol,
-      cargo,
-      emailVerified: false, // Por defecto no verificado
-      emailVerificationToken: verificationToken,
-      emailVerificationSentAt: new Date()
-    };
-
-    const user = await this.usersService.create(userData);
-    
-    // Enviar correo de verificación (solo token, no URL completa)
     try {
-      await this.mailService.sendVerificationEmail(
-        user.correo, 
-        verificationToken, 
-        `${user.nombres} ${user.apellidos}`
-      );
+      console.log('🔵 INICIANDO REGISTRO para:', data.correo);
+
+      // Verificar duplicados
+      if (await this.usersService.findByUsuario(data.usuario)) {
+        throw new BadRequestException('Usuario ya existe');
+      }
+      if (await this.usersService.findByCorreo(data.correo)) {
+        throw new BadRequestException('Correo ya existe');
+      }
+      if (await this.usersService.findByCedula(data.cedula)) {
+        throw new BadRequestException('Cédula ya existe');
+      }
+
+      const { rol: cargo, ...rest } = data;
+
+      // Generar token de verificación
+      verificationToken = crypto.randomBytes(32).toString('hex');
+
+      const userData: Partial<User> = {
+        ...rest,
+        password: data.password,
+        rol: 'ESTUDIANTE' as Rol,
+        cargo,
+        emailVerified: false,
+        emailVerificationToken: verificationToken,
+        emailVerificationSentAt: new Date()
+      };
+
+      // ✅ CREAR USUARIO
+      user = await this.usersService.create(userData);
+      console.log('🟢 USUARIO CREADO - ID:', user.id);
+
     } catch (error) {
-      console.error('Error enviando correo de verificación:', error);
-      
+      console.log('🔴 ERROR en creación de usuario:', error.message);
+      throw error;
     }
 
-    return { 
-      message: 'Usuario creado. Por favor verifica tu correo electrónico para activar tu cuenta.',
-      userId: user.id 
+    // ✅ CAMBIO 3: USAR COLA EN LUGAR DE ENVÍO DIRECTO
+    console.log('📧 AGREGANDO CORREO A COLA...');
+    
+    this.mailQueueService.addToQueue(
+      user.correo,
+      verificationToken,
+      `${user.nombres} ${user.apellidos}`
+    );
+
+    console.log('✅ REGISTRO COMPLETADO - Correo en cola de envío');
+
+    return {
+      success: true,
+      message: '✅ Usuario registrado exitosamente. Recibirás el correo de verificación en los próximos segundos.',
+      userId: user.id
     };
   }
 
@@ -77,7 +91,7 @@ export class AuthService {
       const sentTime = new Date(user.emailVerificationSentAt).getTime();
       const now = new Date().getTime();
       const hoursPassed = (now - sentTime) / (1000 * 60 * 60);
-      
+
       if (hoursPassed > 24) {
         throw new BadRequestException('Token de verificación expirado. Por favor solicita un nuevo correo de verificación.');
       }
@@ -87,7 +101,7 @@ export class AuthService {
     user.emailVerified = true;
     user.emailVerificationToken = null;
     user.emailVerificationSentAt = null;
-    
+
     await this.usersService.save(user);
 
     return { message: 'Correo verificado exitosamente. Ahora puedes iniciar sesión.' };
@@ -105,16 +119,17 @@ export class AuthService {
 
     // Generar nuevo token
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    
+
     user.emailVerificationToken = verificationToken;
     user.emailVerificationSentAt = new Date();
-    
+
     await this.usersService.save(user);
-    
-    // Enviar correo de verificación (solo token, no URL completa)
-    await this.mailService.sendVerificationEmail(
-      user.correo, 
-      verificationToken, 
+
+    // ✅ CAMBIO 4: USAR COLA TAMBIÉN PARA REENVÍOS
+    console.log('📧 REENVÍO - Agregando a cola...');
+    this.mailQueueService.addToQueue(
+      user.correo,
+      verificationToken,
       `${user.nombres} ${user.apellidos}`
     );
 

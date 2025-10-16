@@ -238,7 +238,7 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('admin/inactivos')
   async getCursosInactivos() {
-  
+
     try {
       const courses = await this.coursesService.findInactiveCourses();
       const filtered = this.filterPublicCourseData(courses);
@@ -276,5 +276,14 @@ export class CoursesController {
   async deactivateCourse(@Param('id', ParseIntPipe) id: number) {
     return this.coursesService.softDeleteCourse(id);
   }
+
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Delete(':id/permanent')
+  async deleteCoursePermanently(@Param('id', ParseIntPipe) id: number) {
+    return this.coursesService.deleteCoursePermanently(id);
+  }
+
+
 
 }

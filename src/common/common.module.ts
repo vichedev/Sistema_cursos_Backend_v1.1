@@ -2,13 +2,21 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MailService } from './mail.service';
+import { MailQueueService } from './mail-queue.service'; // ✅ AGREGAR ESTE IMPORT
 import { AIService } from './ai.service';
 
-
-@Global() // ✅ HACER MÓDULO GLOBAL
+@Global() // ✅ MÓDULO GLOBAL
 @Module({
   imports: [ConfigModule],
-  providers: [MailService, AIService, ], // ✅ AGREGAR SanitizeInterceptor
-  exports: [MailService, AIService, ], // ✅ AGREGAR SanitizeInterceptor
+  providers: [
+    MailService, 
+    MailQueueService, // ✅ AGREGAR AQUÍ
+    AIService, 
+  ],
+  exports: [
+    MailService, 
+    MailQueueService, // ✅ AGREGAR AQUÍ TAMBIÉN
+    AIService, 
+  ],
 })
 export class CommonModule {}

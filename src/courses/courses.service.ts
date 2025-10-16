@@ -801,7 +801,7 @@ ${frontendUrl}
         .where('course.activo = :activo', { activo: false })
         .orderBy('course.updatedAt', 'DESC')
         .getMany();
-        
+
       return result;
     } catch (error) {
       console.error('❌ [SERVICE] Error en findInactiveCourses:', error);
@@ -886,5 +886,47 @@ ${frontendUrl}
     }
   }
 
+  // En courses.service.ts - agregar este método
+  async deleteCoursePermanently(id: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const course = await this.findById(id);
+      if (!course) {
+        throw new NotFoundException('Curso no encontrado');
+      }
+
+      // ✅ ELIMINAR TODOS LOS CUPONES ASOCIADOS AL CURSO PRIMERO
+      await this.couponsService.deleteAllCouponsByCourse(id);
+
+      // ✅ ELIMINAR INSCRIPCIONES DE ESTUDIANTES
+      await this.studentCourseRepo.delete({ cursoId: id });
+
+      // ✅ ELIMINAR INTENTOS DE PAGO ASOCIADOS
+      await this.paymentAttemptRepo.delete({ cursoId: id });
+
+      // ✅ FINALMENTE ELIMINAR EL CURSO
+      await this.repo.delete(id);
+
+      this.logger.log(`✅ Curso ${id} eliminado permanentemente con todos sus datos asociados`);
+      return {
+        success: true,
+        message: 'Curso eliminado definitivamente junto con todos sus cupones, inscripciones y datos asociados'
+      };
+
+    } catch (error) {
+      // Manejar error de violación de clave foránea
+      if (error.code === '23503') {
+        return {
+          success: false,
+          message: 'No se puede eliminar el curso porque tiene información asociada que no se pudo eliminar automáticamente'
+        };
+      }
+
+      this.logger.error(`❌ Error eliminando curso ${id} permanentemente:`, error);
+      return {
+        success: false,
+        message: 'Error interno del servidor al eliminar el curso'
+      };
+    }
+  }
 
 }
