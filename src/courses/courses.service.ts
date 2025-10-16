@@ -299,7 +299,7 @@ export class CoursesService {
   // ===============================
   private async sendEmailNotification(student: User, course: Course) {
     try {
-      const frontendUrl = process.env.FRONTEND_URL || 'https://cursos.maat.ec';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
 
       await this.mail.sendMail(
         student.correo,
@@ -346,7 +346,7 @@ export class CoursesService {
   }
 
   private async sendWhatsAppNotification(student: User, course: Course) {
-    const frontendUrl = process.env.FRONTEND_URL || 'https://cursos.maat.ec';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
 
     const mensaje = `🎓 *NUEVO CURSO DISPONIBLE*
 
