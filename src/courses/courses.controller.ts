@@ -209,6 +209,8 @@ export class CoursesController {
         tipo: course.tipo,
         cupos: course.cupos,
         precio: course.precio,
+        createdAt: course.createdAt, 
+        updatedAt: course.updatedAt, 
         fecha: course.fecha,
         hora: course.hora,
         activo: course.activo,
