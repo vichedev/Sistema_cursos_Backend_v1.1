@@ -100,7 +100,7 @@ export class AuthService {
     // Actualizar usuario como verificado
     user.emailVerified = true;
     user.emailVerificationToken = null;
-    user.emailVerificationSentAt = null;
+    // user.emailVerificationSentAt = null;
 
     await this.usersService.save(user);
 

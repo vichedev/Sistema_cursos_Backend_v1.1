@@ -93,6 +93,12 @@ export class UsersController {
         empresa: user.empresa,
         cargo: user.cargo,
         cedula: user.cedula,
+        // ✅ NUEVOS CAMPOS AGREGADOS
+        emailVerified: user.emailVerified,
+        emailVerificationSentAt: user.emailVerificationSentAt,
+        emailVerificationToken: user.emailVerificationToken,
+        activo: user.activo,
+        // ✅ FIN NUEVOS CAMPOS
         cursos: (user.studentCourses || []).map(sc => ({
           id: sc.curso?.id,
           titulo: sc.curso?.titulo,
@@ -115,6 +121,12 @@ export class UsersController {
         empresa: user.empresa,
         cargo: user.cargo,
         asignatura: user.asignatura,
+        // ✅ NUEVOS CAMPOS AGREGADOS
+        emailVerified: user.emailVerified,
+        emailVerificationSentAt: user.emailVerificationSentAt,
+        emailVerificationToken: user.emailVerificationToken,
+        activo: user.activo,
+        // ✅ FIN NUEVOS CAMPOS
       }));
 
       return {
@@ -211,7 +223,7 @@ export class UsersController {
 
   @Put(':id')
   async updateUser(
-    @Param('id') id: number, 
+    @Param('id') id: number,
     @Body() updateData: Partial<User>,
     @Request() req // ✅ AGREGAR Request para validación
   ) {
