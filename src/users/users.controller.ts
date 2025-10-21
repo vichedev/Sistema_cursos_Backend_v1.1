@@ -93,12 +93,11 @@ export class UsersController {
         empresa: user.empresa,
         cargo: user.cargo,
         cedula: user.cedula,
-        // ✅ NUEVOS CAMPOS AGREGADOS
+        celular: user.celular,
         emailVerified: user.emailVerified,
         emailVerificationSentAt: user.emailVerificationSentAt,
         emailVerificationToken: user.emailVerificationToken,
         activo: user.activo,
-        // ✅ FIN NUEVOS CAMPOS
         cursos: (user.studentCourses || []).map(sc => ({
           id: sc.curso?.id,
           titulo: sc.curso?.titulo,
@@ -121,12 +120,12 @@ export class UsersController {
         empresa: user.empresa,
         cargo: user.cargo,
         asignatura: user.asignatura,
-        // ✅ NUEVOS CAMPOS AGREGADOS
+        celular: user.celular,
         emailVerified: user.emailVerified,
         emailVerificationSentAt: user.emailVerificationSentAt,
         emailVerificationToken: user.emailVerificationToken,
         activo: user.activo,
-        // ✅ FIN NUEVOS CAMPOS
+
       }));
 
       return {

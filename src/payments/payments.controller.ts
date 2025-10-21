@@ -626,7 +626,7 @@ export class PaymentsController {
       );
     }
   }
-  
+
   // ===============================
   // ✅ VERIFICAR CUPÓN
   // ===============================
@@ -952,19 +952,49 @@ class PaymentNotificationService {
 
   async sendEnrollmentNotifications(course: any, student: any, paymentMethod: string) {
     try {
-      await this.sendStudentEmail(course, student, paymentMethod);
-      await this.sendStudentWhatsApp(course, student, paymentMethod);
-      await this.sendAdminNotification(course, student, paymentMethod);
+      // ✅ ENVÍO INDEPENDIENTE - WhatsApp se envía aunque falle el email
+      const emailPromise = this.sendStudentEmail(course, student, paymentMethod)
+        .catch(error => {
+          console.error('❌ Error enviando email, pero continuando con WhatsApp:', error.message);
+          return null; // Retornar null para indicar fallo
+        });
+
+      const whatsappPromise = this.sendStudentWhatsApp(course, student, paymentMethod)
+        .catch(error => {
+          console.error('❌ Error enviando WhatsApp:', error.message);
+          return null; // Retornar null para indicar fallo
+        });
+
+      const adminPromise = this.sendAdminNotification(course, student, paymentMethod)
+        .catch(error => {
+          console.error('❌ Error enviando notificación admin:', error.message);
+          return null; // Retornar null para indicar fallo
+        });
+
+      // ✅ ESPERAR TODAS LAS PROMESAS INDEPENDIENTEMENTE
+      const resultados = await Promise.allSettled([emailPromise, whatsappPromise, adminPromise]);
+
+      // ✅ LOG DEL RESULTADO DETALLADO
+      console.log(`📊 Resumen notificaciones para ${student.correo}:`);
+      console.log(`   📧 Email: ${resultados[0].status === 'fulfilled' && resultados[0].value !== null ? '✅ Enviado' : '❌ Falló'}`);
+      console.log(`   📱 WhatsApp: ${resultados[1].status === 'fulfilled' && resultados[1].value !== null ? '✅ Enviado' : '❌ Falló'}`);
+      console.log(`   👨‍💼 Admin: ${resultados[2].status === 'fulfilled' && resultados[2].value !== null ? '✅ Enviado' : '❌ Falló'}`);
+
     } catch (error) {
-      console.error('Error enviando notificaciones:', error);
+      console.error('💥 Error crítico en sistema de notificaciones:', error);
     }
   }
 
   private async sendStudentEmail(course: any, student: any, paymentMethod: string) {
-    const profesorNombre = course.profesor ?
-      `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
+    try {
+      const profesorNombre = course.profesor ?
+        `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
 
-    const emailContent = `
+      // ✅ OBTENER EL LINK ESPECÍFICO DEL CURSO PARA INSCRITOS
+      const linkCurso = course.link || 'Link por confirmar';
+      const tieneLinkDisponible = !!course.link;
+
+      const emailContent = `
       <div style="font-family: Arial, sans-serif; color:#222;">
         <h2>¡Inscripción confirmada!</h2>
         <p>Hola <b>${student.nombres}</b>,<br>
@@ -976,7 +1006,25 @@ class PaymentNotificationService {
           <li><b>Hora:</b> ${course.hora ? course.hora : 'Por confirmar'}</li>
           <li><b>Docente:</b> ${profesorNombre}</li>
           <li><b>Precio pagado:</b> $${course.precio || 0} (${paymentMethod})</li>
+          ${tieneLinkDisponible ? `<li><b>🔗 Link del curso:</b> <a href="${linkCurso}">${linkCurso}</a></li>` : ''}
         </ul>
+        
+        ${tieneLinkDisponible ? `
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${linkCurso}" 
+             style="background: #2563eb; color: white; padding: 12px 30px; 
+                    text-decoration: none; border-radius: 6px; font-weight: bold;
+                    display: inline-block;">
+            🚀 Acceder al Curso
+          </a>
+        </div>
+        ` : `
+        <div style="background: #fef3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p style="margin: 0; color: #856404;">
+            <b>📝 Nota:</b> El link del curso será proporcionado próximamente.
+          </p>
+        </div>
+        `}
         
         <div style="margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 5px;">
           <h3 style="margin-top: 0;">¿Necesitas ayuda?</h3>
@@ -994,27 +1042,50 @@ class PaymentNotificationService {
       </div>
     `;
 
-    await this.mailService.sendMail(
-      student.correo,
-      'Confirmación de inscripción al curso',
-      emailContent
-    );
+      await this.mailService.sendMail(
+        student.correo,
+        'Confirmación de inscripción al curso',
+        emailContent
+      );
+
+      console.log(`✅ Email enviado exitosamente a: ${student.correo}`);
+      return true; // Indicar éxito
+
+    } catch (error) {
+      console.error(`❌ FALLO CRÍTICO enviando email a ${student.correo}:`, error.message);
+      throw error; // Relanzar para manejo externo
+    }
   }
 
   private async sendStudentWhatsApp(course: any, student: any, paymentMethod: string) {
-    if (!student.celular) return;
+    if (!student.celular) {
+      console.log(`⚠️ No se envía WhatsApp: teléfono no disponible para ${student.correo}`);
+      return null;
+    }
 
-    const profesorNombre = course.profesor ?
-      `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
+    try {
+      const profesorNombre = course.profesor ?
+        `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
 
-    const mensaje = `¡Inscripción confirmada!
+      // ✅ OBTENER EL LINK ESPECÍFICO DEL CURSO PARA INSCRITOS
+      const linkCurso = course.link || 'Por confirmar';
+      const tieneLinkDisponible = !!course.link;
+
+      const mensaje = `¡Inscripción confirmada!
 Hola ${student.nombres},
-Te confirmamos tu inscripción al curso: ${course.titulo}.
-Docente: ${profesorNombre}
-Fecha: ${course.fecha ? new Date(course.fecha).toLocaleDateString() : 'Por confirmar'}
-Hora: ${course.hora || 'Por confirmar'}
-Precio: $${course.precio || 0}
-Método: ${paymentMethod}
+
+Te confirmamos tu inscripción al curso: 
+📚 *${course.titulo}*
+
+📖 ${course.descripcion}
+
+📅 *Fecha:* ${course.fecha ? new Date(course.fecha).toLocaleDateString() : 'Por confirmar'}
+🕐 *Hora:* ${course.hora || 'Por confirmar'}
+👨‍🏫 *Profesor:* ${profesorNombre}
+💰 *Precio:* $${course.precio || 0}
+🎫 *Método:* ${paymentMethod}
+
+${tieneLinkDisponible ? `🔗 *Link del curso:* ${linkCurso}` : `📝 *Nota:* El link del curso será proporcionado próximamente`}
 
 ¿Necesitas ayuda? Contáctanos:
 📞 Soporte: ${this.telefonoSoporte}
@@ -1022,7 +1093,15 @@ Método: ${paymentMethod}
 
 ¡Nos vemos en el curso!`;
 
-    await this.sendWhatsApp(student.celular, mensaje);
+      await this.sendWhatsApp(student.celular, mensaje);
+      console.log(`✅ WhatsApp enviado exitosamente a: ${student.celular}`);
+      return true; // Indicar éxito
+
+    } catch (error) {
+      console.error(`❌ FALLO enviando WhatsApp a ${student.celular}:`, error.message);
+      // NO relanzamos el error para que no afecte otras notificaciones
+      return null;
+    }
   }
 
   private async sendAdminNotification(course: any, student: any, paymentMethod: string) {

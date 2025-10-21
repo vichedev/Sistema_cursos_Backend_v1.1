@@ -1,5 +1,6 @@
 // src/auth/auth.module.ts
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
@@ -7,13 +8,15 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import { RolesGuard } from './roles.guard';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { CommonModule } from '../common/common.module'; // <-- agregar
+import { CommonModule } from '../common/common.module';
+import { User } from '../users/user.entity'; // ✅ AGREGAR
 
 @Module({
   imports: [
     UsersModule,
     ConfigModule,
-    CommonModule, // <-- aquí
+    CommonModule,
+    TypeOrmModule.forFeature([User]), // ✅ AGREGAR ESTA LÍNEA
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

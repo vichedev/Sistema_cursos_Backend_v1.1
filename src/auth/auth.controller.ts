@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Query, BadRequestException, Request, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Query, BadRequestException, Request, UsePipes, ValidationPipe, Param } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -38,6 +38,17 @@ export class AuthController {
       throw new BadRequestException('Email es requerido');
     }
     return this.authService.resendVerificationEmail(email);
+  }
+
+  // ✅ NUEVO: Endpoint para verificación manual por ADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Post('admin/verify-user/:userId')
+  async verifyUserManually(@Param('userId') userId: number) {
+    if (!userId) {
+      throw new BadRequestException('ID de usuario requerido');
+    }
+    return this.authService.verifyUserManually(userId);
   }
 
   // Ruta protegida solo para ADMIN (MANTENIENDO TU CÓDIGO)
