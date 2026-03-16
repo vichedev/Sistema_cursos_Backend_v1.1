@@ -194,12 +194,6 @@ export class CoursesController {
         (!cupon.fechaExpiracion || new Date() < cupon.fechaExpiracion)
       ) || [];
 
-      // ✅ DEBUG: Verificar cupones en el controlador también
-      if (cuponesActivos.length > 0) {
-        cuponesActivos.forEach(cupon => {
-        });
-      }
-
       // Crear objeto filtrado con solo información segura para mostrar públicamente
       const filteredCourse: any = {
         id: course.id,
@@ -208,9 +202,11 @@ export class CoursesController {
         imagen: course.imagen,
         tipo: course.tipo,
         cupos: course.cupos,
+        link: course.link, // ✅ INCLUIR LINK (aunque se filtra después según permisos)
+        recursosLink: course.recursosLink, // ✅ AGREGAR recursosLink
         precio: course.precio,
-        createdAt: course.createdAt, 
-        updatedAt: course.updatedAt, 
+        createdAt: course.createdAt,
+        updatedAt: course.updatedAt,
         fecha: course.fecha,
         hora: course.hora,
         activo: course.activo,

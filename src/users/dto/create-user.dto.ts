@@ -1,18 +1,19 @@
+// src/users/dto/create-user.dto.ts
 import { IsString, IsEmail, IsNotEmpty, MinLength, MaxLength, Matches, IsOptional, IsEnum } from 'class-validator';
 import { Rol } from '../user.entity';
 
 export class CreateUserDto {
   @IsNotEmpty({ message: 'Los nombres son obligatorios' })
   @IsString()
-  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/, { 
-    message: 'Los nombres solo pueden contener letras y espacios' 
+  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/, {
+    message: 'Los nombres solo pueden contener letras y espacios'
   })
   nombres: string;
 
   @IsNotEmpty({ message: 'Los apellidos son obligatorios' })
   @IsString()
-  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/, { 
-    message: 'Los apellidos solo pueden contener letras y espacios' 
+  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/, {
+    message: 'Los apellidos solo pueden contener letras y espacios'
   })
   apellidos: string;
 
@@ -24,22 +25,28 @@ export class CreateUserDto {
   @IsString()
   @MinLength(3)
   @MaxLength(50)
-  @Matches(/^[a-zA-Z0-9_@.-]+$/, { 
-    message: 'El usuario solo puede contener letras, números y @ . - _' 
+  @Matches(/^[a-zA-Z0-9_@.-]+$/, {
+    message: 'El usuario solo puede contener letras, números y @ . - _'
   })
   usuario: string;
 
-  @IsNotEmpty({ message: 'La cédula es obligatoria' })
+  @IsNotEmpty({ message: 'La identificación es obligatoria' })
   @IsString()
-  @Matches(/^[0-9]{10}$/, { 
-    message: 'La cédula debe tener exactamente 10 dígitos numéricos' 
+  @Matches(/^[a-zA-Z0-9-]+$/, {
+    message: 'La identificación contiene caracteres inválidos'
   })
   cedula: string;
 
+  // ✅ PAÍS - NUEVO CAMPO OBLIGATORIO
+  @IsNotEmpty({ message: 'El país es obligatorio' })
+  @IsString()
+  pais: string;
+
+  // ✅ CELULAR - FORMATO INTERNACIONAL
   @IsNotEmpty({ message: 'El celular es obligatorio' })
   @IsString()
-  @Matches(/^[0-9]{10}$/, { 
-    message: 'El celular debe tener exactamente 10 dígitos numéricos' 
+  @Matches(/^\+\d{1,3}\d{7,15}$/, {
+    message: 'El celular debe tener formato internacional válido (ej: +593991234567)'
   })
   celular: string;
 
@@ -51,16 +58,25 @@ export class CreateUserDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]*$/, { 
-    message: 'La asignatura solo puede contener letras y espacios' 
+  @Matches(/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]*$/, {
+    message: 'La asignatura solo puede contener letras y espacios'
   })
   asignatura?: string;
 
+  // ✅ ROL - PARA ADMIN/ESTUDIANTE (opcional, por defecto ESTUDIANTE)
   @IsOptional()
-  @IsEnum(['ADMIN', 'ESTUDIANTE'], { 
-    message: 'El rol debe ser ADMIN o ESTUDIANTE' 
+  @IsEnum(['ADMIN', 'ESTUDIANTE'], {
+    message: 'El rol debe ser ADMIN o ESTUDIANTE'
   })
   rol?: Rol;
+
+  // ✅ CARGO - NUEVO CAMPO PARA GERENTE/TÉCNICO
+  @IsOptional()
+  @IsString()
+  @Matches(/^(Gerente|Técnico)$/, {
+    message: 'El cargo debe ser "Gerente" o "Técnico"'
+  })
+  cargo?: string;
 
   @IsOptional()
   @IsString()
@@ -69,8 +85,4 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   empresa?: string;
-
-  @IsOptional()
-  @IsString()
-  cargo?: string;
 }

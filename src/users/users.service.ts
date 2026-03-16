@@ -44,6 +44,47 @@ export class UsersService {
       throw new BadRequestException('Correo, usuario y cédula son campos obligatorios');
     }
 
+    // ✅ VALIDAR PAÍS (obligatorio)
+    if (!data.pais) {
+      throw new BadRequestException('El país es obligatorio');
+    }
+
+    // ✅ VALIDAR CELULAR
+    if (!data.celular) {
+      throw new BadRequestException('El celular es obligatorio');
+    }
+
+    // ✅ NORMALIZAR CELULAR: Eliminar 0 después del código de país
+    // Ejemplo: +5930991234567 → +593991234567
+    data.celular = data.celular.replace(/^(\+\d{1,3})0+/, '$1');
+
+    // ✅ VALIDAR FORMATO INTERNACIONAL
+    const phoneRegex = /^\+\d{1,3}\d{7,15}$/;
+    if (!phoneRegex.test(data.celular)) {
+      throw new BadRequestException(
+        `El formato del celular es inválido. Debe incluir código de país (ej: +593991234567)`
+      );
+    }
+
+    // ✅ VALIDACIÓN ESPECÍFICA POR PAÍS (longitud correcta)
+    const phoneValidations = {
+      EC: { length: 13, message: 'El celular ecuatoriano debe tener 9 dígitos después del +593' },
+      CO: { length: 13, message: 'El celular colombiano debe tener 10 dígitos después del +57' },
+      CL: { length: 12, message: 'El celular chileno debe tener 9 dígitos después del +56' },
+      AR: { length: 13, message: 'El celular argentino debe tener 10 dígitos después del +54' },
+      PE: { length: 12, message: 'El celular peruano debe tener 9 dígitos después del +51' },
+      MX: { length: 13, message: 'El celular mexicano debe tener 10 dígitos después del +52' },
+      UY: { length: 12, message: 'El celular uruguayo debe tener 8 dígitos después del +598' },
+      PY: { length: 13, message: 'El celular paraguayo debe tener 9 dígitos después del +595' },
+      BO: { length: 12, message: 'El celular boliviano debe tener 8 dígitos después del +591' },
+      VE: { length: 13, message: 'El celular venezolano debe tener 10 dígitos después del +58' },
+    };
+
+    const validation = phoneValidations[data.pais];
+    if (validation && data.celular.length !== validation.length) {
+      throw new BadRequestException(validation.message);
+    }
+
     // Validar si el correo ya existe
     const existingEmail = await this.findByCorreo(data.correo);
     if (existingEmail) {
@@ -59,15 +100,18 @@ export class UsersService {
     // Validar si la cédula ya existe
     const existingCedula = await this.findByCedula(data.cedula);
     if (existingCedula) {
-      throw new BadRequestException('La cédula ya está registrada');
+      throw new BadRequestException('La identificación ya está registrada');
     }
 
-    // Validar si el celular ya existe (si se proporciona)
-    if (data.celular) {
-      const existingCelular = await this.findByCelular(data.celular);
-      if (existingCelular) {
-        throw new BadRequestException('El número de celular ya está registrado');
-      }
+    // ✅ Validar si el celular ya existe (después de normalizar)
+    const existingCelular = await this.findByCelular(data.celular);
+    if (existingCelular) {
+      throw new BadRequestException('El número de celular ya está registrado');
+    }
+
+    // ✅ Validar cargo si viene (opcional)
+    if (data.cargo && !['Gerente', 'Técnico'].includes(data.cargo)) {
+      throw new BadRequestException('El cargo debe ser "Gerente" o "Técnico"');
     }
 
     // Solo hashear si la contraseña existe y NO está ya hasheada
@@ -78,7 +122,6 @@ export class UsersService {
     const user = this.repo.create(data);
     return this.repo.save(user);
   }
-
 
   async findById(id: number) {
     return this.repo.findOne({ where: { id } });
@@ -105,6 +148,11 @@ export class UsersService {
       throw new BadRequestException('Usuario no encontrado');
     }
 
+    // ✅ NORMALIZAR CELULAR si viene en la actualización
+    if (data.celular) {
+      data.celular = data.celular.replace(/^(\+\d{1,3})0+/, '$1');
+    }
+
     // Validar duplicados solo si los campos cambian
     if (data.correo && data.correo !== currentUser.correo) {
       const existing = await this.findByCorreo(data.correo);
@@ -123,11 +171,32 @@ export class UsersService {
     if (data.cedula && data.cedula !== currentUser.cedula) {
       const existing = await this.findByCedula(data.cedula);
       if (existing && existing.id !== id) {
-        throw new BadRequestException('La cédula ya está registrada por otro usuario');
+        throw new BadRequestException('La identificación ya está registrada por otro usuario');
       }
     }
 
+    // ✅ VALIDAR CELULAR INTERNACIONAL EN ACTUALIZACIÓN
     if (data.celular && data.celular !== currentUser.celular) {
+      // Validar formato internacional
+      const phoneRegex = /^\+\d{1,3}\d{7,15}$/;
+      if (!phoneRegex.test(data.celular)) {
+        throw new BadRequestException(
+          'El formato del celular es inválido. Debe incluir código de país (ej: +593991234567)'
+        );
+      }
+
+      // ✅ Validar longitud según país (usar el país actual del usuario o el nuevo)
+      const paisActual = data.pais || currentUser.pais;
+      const phoneValidations = {
+        EC: 13, CO: 13, CL: 12, AR: 13, PE: 12, MX: 13, UY: 12, PY: 13, BO: 12, VE: 13
+      };
+
+      const longitudEsperada = phoneValidations[paisActual];
+      if (longitudEsperada && data.celular.length !== longitudEsperada) {
+        throw new BadRequestException(`El celular no tiene la longitud correcta para el país seleccionado`);
+      }
+
+      // Validar si ya existe
       const existing = await this.findByCelular(data.celular);
       if (existing && existing.id !== id) {
         throw new BadRequestException('El número de celular ya está registrado por otro usuario');
@@ -143,7 +212,6 @@ export class UsersService {
     return this.findById(id);
   }
 
-  
   async delete(id: number): Promise<{ success: boolean; message: string }> {
     if (id === 1) {
       throw new BadRequestException('No se puede eliminar el administrador principal del sistema');
@@ -203,7 +271,8 @@ export class UsersService {
         empresa: true,
         cargo: true,
         rol: true,
-        activo: true
+        activo: true,
+        pais: true, // ✅ INCLUIR PAÍS
         // ❌ NO incluir: correo, usuario, cedula, celular, password, etc.
       }
     });
@@ -224,7 +293,7 @@ export class UsersService {
 
     if (checkData.cedula) {
       const existing = await this.findByCedula(checkData.cedula);
-      if (existing) duplicates.cedula = 'Esta cédula ya está registrada';
+      if (existing) duplicates.cedula = 'Esta identificación ya está registrada';
     }
 
     if (checkData.celular) {
@@ -246,6 +315,7 @@ export class UsersService {
         apellidos: true,
         correo: true,
         celular: true,
+        pais: true, // ✅ INCLUIR PAÍS
         ciudad: true,
         empresa: true,
         cargo: true,
@@ -253,7 +323,6 @@ export class UsersService {
         rol: true,
         activo: true,
         emailVerified: true,
-
       }
     });
 
@@ -267,6 +336,7 @@ export class UsersService {
         apellidos: true,
         correo: true,
         celular: true,
+        pais: true, // ✅ INCLUIR PAÍS
         ciudad: true,
         empresa: true,
         cargo: true,
@@ -275,22 +345,18 @@ export class UsersService {
         rol: true,
         activo: true,
         emailVerified: true,
-
       }
     });
-
 
     const estudiantesConCursos = await Promise.all(
       estudiantes.map(async (estudiante) => {
         try {
-
           const studentCourses = await this.repo.manager
             .getRepository(StudentCourse)
             .find({
               where: { estudianteId: estudiante.id },
               relations: ['curso']
             });
-
 
           const cursos = studentCourses
             .filter(sc => sc.curso && sc.curso.activo)
@@ -306,7 +372,6 @@ export class UsersService {
               fecha: sc.curso.fecha,
               hora: sc.curso.hora,
               activo: sc.curso.activo,
-
             }));
 
           return {
@@ -322,6 +387,7 @@ export class UsersService {
         }
       })
     );
+
     return {
       estudiantes: estudiantesConCursos,
       administradores

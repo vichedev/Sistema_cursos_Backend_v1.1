@@ -22,8 +22,10 @@ export class CoursesService {
 
   constructor(
     @InjectRepository(Course) private repo: Repository<Course>,
-    @InjectRepository(StudentCourse) private studentCourseRepo: Repository<StudentCourse>,
-    @InjectRepository(PaymentAttempt) private paymentAttemptRepo: Repository<PaymentAttempt>,
+    @InjectRepository(StudentCourse)
+    private studentCourseRepo: Repository<StudentCourse>,
+    @InjectRepository(PaymentAttempt)
+    private paymentAttemptRepo: Repository<PaymentAttempt>,
     @InjectRepository(User) private userRepo: Repository<User>,
     private usersService: UsersService,
     private mail: MailService,
@@ -31,7 +33,7 @@ export class CoursesService {
     private readonly sse: NotificationsSseService,
     // ✅ inyecta el servicio de cupones
     private readonly couponsService: CouponsService,
-  ) { }
+  ) {}
 
   // ===============================
   // ✅ MÉTODO AUXILIAR: Formatear fecha sin zona horaria
@@ -80,9 +82,10 @@ export class CoursesService {
     let cuponesData = [];
     if (data.cupones) {
       try {
-        cuponesData = typeof data.cupones === 'string'
-          ? JSON.parse(data.cupones)
-          : data.cupones;
+        cuponesData =
+          typeof data.cupones === 'string'
+            ? JSON.parse(data.cupones)
+            : data.cupones;
         delete data.cupones; // Remover del data principal
       } catch (error) {
         this.logger.error('Error parseando cupones:', error);
@@ -108,16 +111,16 @@ export class CoursesService {
     // ✅ CREAR CUPONES ASOCIADOS AL CURSO
     if (cuponesData.length > 0) {
       try {
-
         for (const cuponItem of cuponesData) {
           try {
             // ✅ VERIFICACIÓN DE TIPO SEGURA
-            if (cuponItem &&
+            if (
+              cuponItem &&
               typeof cuponItem === 'object' &&
               'codigo' in cuponItem &&
               'tipo' in cuponItem &&
-              'usosMaximos' in cuponItem) {
-
+              'usosMaximos' in cuponItem
+            ) {
               const cuponData = cuponItem as {
                 codigo: string;
                 tipo: string;
@@ -130,12 +133,11 @@ export class CoursesService {
                 tipo: cuponData.tipo as any,
                 usosMaximos: cuponData.usosMaximos,
                 fechaExpiracion: cuponData.fechaExpiracion,
-                cursoId: courseId
+                cursoId: courseId,
               });
 
               // ✅ ACCEDER AL ID DE FORMA SEGURA
               const cuponId = (cuponCreado as any).id || 'N/A';
-
             } else {
               console.warn('❌ Datos de cupón inválidos:', cuponItem);
             }
@@ -144,21 +146,30 @@ export class CoursesService {
             // Continuar con el siguiente cupón
           }
         }
-        this.logger.log(`✅ ${cuponesData.length} cupones procesados para el curso ${courseId}`);
+        this.logger.log(
+          `✅ ${cuponesData.length} cupones procesados para el curso ${courseId}`,
+        );
       } catch (error) {
         this.logger.error('Error en proceso de creación de cupones:', error);
       }
     }
 
-    const notificarCorreo = data.notificarCorreo === 'true' || data.notificarCorreo === true;
-    const notificarWhatsapp = data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
+    const notificarCorreo =
+      data.notificarCorreo === 'true' || data.notificarCorreo === true;
+    const notificarWhatsapp =
+      data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
 
     if (notificarCorreo || notificarWhatsapp) {
       // no esperar
-      this.notifyAllStudentsBackground(courseId, notificarCorreo, notificarWhatsapp)
-        .catch((err) =>
-          this.logger.error(`Error en notificación en segundo plano: ${err.message}`),
-        );
+      this.notifyAllStudentsBackground(
+        courseId,
+        notificarCorreo,
+        notificarWhatsapp,
+      ).catch((err) =>
+        this.logger.error(
+          `Error en notificación en segundo plano: ${err.message}`,
+        ),
+      );
     }
 
     return this.findById(courseId);
@@ -178,19 +189,23 @@ export class CoursesService {
 
     return {
       ...course,
-      cupones
+      cupones,
     };
   }
 
   // ===============================
   // ✅ MÉTODO PARA VALIDAR Y APLICAR CUPÓN
   // ===============================
-  async validateAndApplyCoupon(cursoId: number, codigoCupon: string, userId: number) {
+  async validateAndApplyCoupon(
+    cursoId: number,
+    codigoCupon: string,
+    userId: number,
+  ) {
     try {
       const result = await this.couponsService.validateAndApplyCoupon(
         cursoId,
         codigoCupon,
-        userId
+        userId,
       );
 
       return result;
@@ -222,17 +237,23 @@ export class CoursesService {
         return;
       }
 
-      const estudiantes = await this.userRepo.find({ where: { rol: 'ESTUDIANTE' } });
+      const estudiantes = await this.userRepo.find({
+        where: { rol: 'ESTUDIANTE' },
+      });
       const total = estudiantes.length;
 
       // ▶️ START (una tarjeta por curso)
       this.sse.emitStart(courseId, course.titulo, total);
 
-      this.logger.log(`📢 Programando notificaciones para ${total} estudiantes`);
+      this.logger.log(
+        `📢 Programando notificaciones para ${total} estudiantes`,
+      );
 
       if (total === 0) {
         this.sse.emitDone(courseId);
-        this.logger.log(`✅ Notificaciones (0) completadas para el curso: ${course.titulo}`);
+        this.logger.log(
+          `✅ Notificaciones (0) completadas para el curso: ${course.titulo}`,
+        );
         return;
       }
 
@@ -246,7 +267,9 @@ export class CoursesService {
         const batchIndex = i / batchSize;
 
         setTimeout(async () => {
-          this.logger.log(`⏰ Procesando lote ${batchIndex + 1} de ${totalBatches}`);
+          this.logger.log(
+            `⏰ Procesando lote ${batchIndex + 1} de ${totalBatches}`,
+          );
 
           for (const est of batch) {
             try {
@@ -256,7 +279,9 @@ export class CoursesService {
                   await this.sendEmailNotification(est, course);
                   this.logger.log(`📧 Correo enviado a ${est.correo}`);
                 } catch (emailError) {
-                  this.logger.error(`❌ Error enviando correo a ${est.correo}: ${emailError.message}`);
+                  this.logger.error(
+                    `❌ Error enviando correo a ${est.correo}: ${emailError.message}`,
+                  );
                   // ✅ CONTINUAR con WhatsApp incluso si falla el correo
                 }
               }
@@ -267,12 +292,15 @@ export class CoursesService {
                   await this.sendWhatsAppNotification(est, course);
                   this.logger.log(`📱 WhatsApp enviado a ${est.celular}`);
                 } catch (whatsappError) {
-                  this.logger.error(`❌ Error enviando WhatsApp a ${est.celular}: ${whatsappError.message}`);
+                  this.logger.error(
+                    `❌ Error enviando WhatsApp a ${est.celular}: ${whatsappError.message}`,
+                  );
                 }
               }
-
             } catch (err) {
-              this.logger.error(`❌ Error general notificando a ${est.correo}: ${err.message}`);
+              this.logger.error(
+                `❌ Error general notificando a ${est.correo}: ${err.message}`,
+              );
             } finally {
               completed = Math.min(completed + 1, total);
               // ▶️ PROGRESS
@@ -283,24 +311,31 @@ export class CoursesService {
               if (completed === total) {
                 // ▶️ DONE
                 this.sse.emitDone(courseId);
-                this.logger.log(`✅ Notificaciones completadas para el curso: ${course.titulo}`);
+                this.logger.log(
+                  `✅ Notificaciones completadas para el curso: ${course.titulo}`,
+                );
               }
             }
           }
         }, batchIndex * delayBetweenBatches);
       }
     } catch (err) {
-      this.logger.error(`Error en notificación en segundo plano: ${err.message}`);
+      this.logger.error(
+        `Error en notificación en segundo plano: ${err.message}`,
+      );
     }
   }
 
   // ===============================
   // Métodos auxiliares para notificaciones - MEJORADO
   // ===============================
+  // src/courses/courses.service.ts
+
   private async sendEmailNotification(student: User, course: Course) {
     try {
       const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
 
+      // ❌ SIN RECURSOS - Solo información básica del curso
       await this.mail.sendMail(
         student.correo,
         `📚 Nuevo curso disponible: ${course.titulo}`,
@@ -309,45 +344,51 @@ export class CoursesService {
         <h2 style="color: #ff6b35;">🎓 Nuevo curso disponible</h2>
         <h3>${course.titulo}</h3>
         <p style="font-size: 16px; line-height: 1.5;">${course.descripcion}</p>
+        
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
           <p><b>📅 Fecha:</b> ${course.fecha || 'Por confirmar'}</p>
           <p><b>🕐 Hora:</b> ${course.hora || 'Por confirmar'}</p>
-          <p><b>👨‍🏫 Profesor:</b> ${course.profesor
-          ? course.profesor.nombres + ' ' + course.profesor.apellidos
-          : 'Por confirmar'
-        }</p>
+          <p><b>👨‍🏫 Profesor:</b> ${
+            course.profesor
+              ? course.profesor.nombres + ' ' + course.profesor.apellidos
+              : 'Por confirmar'
+          }</p>
           <p><b>💰 Precio:</b> ${course.precio > 0 ? '$' + course.precio : 'Gratis'}</p>
           <p><b>📍 Modalidad:</b> ${course.tipo.replace('_', ' ')}</p>
         </div>
+
         <div style="text-align: center; margin: 25px 0;">
           <a href="${frontendUrl}" 
              style="background: #ff6b35; color: white; padding: 12px 30px; 
                     text-decoration: none; border-radius: 6px; font-weight: bold;
                     display: inline-block; font-size: 16px;">
-            🚀 Ingresar al Sistema
+            🚀 Ver Curso
           </a>
         </div>
+        
         <p style="text-align: center; color: #666; font-size: 14px;">
           <b>Enlace de acceso:</b> ${frontendUrl}
         </p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <small style="color: #999;">Sistema de Cursos MAAT</small>
       </div>
-    `,
+      `,
       );
 
-      this.logger.log(`✅ Correo enviado exitosamente a ${student.correo}`);
+      this.logger.log(`✅ Correo de nuevo curso enviado a ${student.correo}`);
       return true;
-
     } catch (error) {
-      this.logger.error(`❌ Error enviando correo a ${student.correo}: ${error.message}`);
-      throw error; // Relanzar el error para que el caller lo maneje
+      this.logger.error(
+        `❌ Error enviando correo a ${student.correo}: ${error.message}`,
+      );
+      throw error;
     }
   }
 
   private async sendWhatsAppNotification(student: User, course: Course) {
     const frontendUrl = process.env.FRONTEND_URL || 'https://moviesplus.xyz';
 
+    // ❌ SIN RECURSOS - Solo información básica
     const mensaje = `🎓 *NUEVO CURSO DISPONIBLE*
 
 Hola ${student.nombres} 👋
@@ -376,61 +417,76 @@ ${frontendUrl}
   // ===============================
   private async enviarWhatsapp(celular: string, mensaje: string) {
     if (!celular) {
-      this.logger.warn('⚠️ No se pudo enviar WhatsApp: número celular no definido');
+      this.logger.warn(
+        '⚠️ No se pudo enviar WhatsApp: número celular no definido',
+      );
       return;
     }
 
     const token = process.env.WHATSAPP_API_TOKEN;
     if (!token) {
-      this.logger.error('❌ No se pudo enviar WhatsApp: token no configurado en .env');
+      this.logger.error(
+        '❌ No se pudo enviar WhatsApp: token no configurado en .env',
+      );
       return;
     }
 
     const numeroFormateado = celular.replace(/[^0-9]/g, '');
     const url = 'https://app.wbot.ec:443/backend/api/messages/send';
-    const data = { number: numeroFormateado, body: mensaje, saveOnTicket: true, linkPreview: true };
+    const data = {
+      number: numeroFormateado,
+      body: mensaje,
+      saveOnTicket: true,
+      linkPreview: true,
+    };
 
     try {
       await axios.post(url, data, {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
         timeout: 10000,
       });
       this.logger.log(`📱 Mensaje WhatsApp enviado a ${numeroFormateado}`);
     } catch (error) {
       this.logger.error(
-        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${JSON.stringify(error.response?.data) || error.message
+        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${
+          JSON.stringify(error.response?.data) || error.message
         }`,
       );
     }
   }
 
   findAll() {
-    return this.repo
-      .createQueryBuilder('course')
-      .leftJoinAndSelect('course.profesor', 'profesor')
-      // ❌ QUITAR: .leftJoinAndSelect('course.cupones', 'cupones')
-      .select([
-        'course.id',
-        'course.titulo',
-        'course.descripcion',
-        'course.imagen',
-        'course.tipo',
-        'course.cupos',
-        'course.link',
-        'course.precio',
-        'course.fecha',
-        'course.hora',
-        'course.activo',
-        'course.createdAt',
-        'course.updatedAt',
-        'profesor.id',
-        'profesor.nombres',
-        'profesor.apellidos',
-        'profesor.asignatura',
-        // ❌ QUITAR 'cupones'
-      ])
-      .where('course.activo = :activo', { activo: true })
-      .getMany();
+    return (
+      this.repo
+        .createQueryBuilder('course')
+        .leftJoinAndSelect('course.profesor', 'profesor')
+        // ❌ QUITAR: .leftJoinAndSelect('course.cupones', 'cupones')
+        .select([
+          'course.id',
+          'course.titulo',
+          'course.descripcion',
+          'course.imagen',
+          'course.tipo',
+          'course.cupos',
+          'course.link',
+          'course.recursosLink',
+          'course.precio',
+          'course.fecha',
+          'course.hora',
+          'course.activo',
+          'course.createdAt',
+          'course.updatedAt',
+          'profesor.id',
+          'profesor.nombres',
+          'profesor.apellidos',
+          'profesor.asignatura',
+        ])
+        .where('course.activo = :activo', { activo: true })
+        .getMany()
+    );
   }
 
   findById(id: number) {
@@ -445,6 +501,7 @@ ${frontendUrl}
         tipo: true,
         cupos: true,
         link: true,
+        recursosLink: true,
         precio: true,
         fecha: true,
         hora: true,
@@ -455,10 +512,10 @@ ${frontendUrl}
           id: true,
           nombres: true,
           apellidos: true,
-          asignatura: true
+          asignatura: true,
         },
-        // ❌ QUITAR toda la sección de cupones
-      }
+      },
+      cache: false,
     });
   }
 
@@ -466,7 +523,6 @@ ${frontendUrl}
     await this.repo.update(courseId, { cupos: nuevoCupo });
   }
 
-  // Update cursos con manejo de cupones
   async update(id: number, data: Partial<Course>) {
     const course = await this.findById(id);
     if (!course) throw new NotFoundException('Curso no encontrado');
@@ -476,13 +532,20 @@ ${frontendUrl}
       data.fecha = this.formatDateOnly(data.fecha);
     }
 
+    // ✅ FORZAR PRECIO A 0 SI EL CURSO ES GRATIS
+    if (data.tipo && data.tipo.endsWith('GRATIS')) {
+      data.precio = 0;
+      this.logger.log(`💰 Curso cambiado a GRATIS, forzando precio a 0`);
+    }
+
     // ✅ Extraer cupones del data si existen
     let cuponesData = [];
     if (data.cupones) {
       try {
-        cuponesData = typeof data.cupones === 'string'
-          ? JSON.parse(data.cupones)
-          : data.cupones;
+        cuponesData =
+          typeof data.cupones === 'string'
+            ? JSON.parse(data.cupones)
+            : data.cupones;
         delete data.cupones; // Remover del data principal
       } catch (error) {
         this.logger.error('Error parseando cupones:', error);
@@ -492,7 +555,8 @@ ${frontendUrl}
     await this.repo.update(id, data);
 
     // ✅ ACTUALIZACIÓN INTELIGENTE DE CUPONES
-    if (cuponesData.length >= 0) { // Incluye cuando es array vacío (eliminar todos)
+    if (cuponesData.length >= 0) {
+      // Incluye cuando es array vacío (eliminar todos)
       await this.syncCouponsForCourse(id, cuponesData);
     }
 
@@ -503,27 +567,32 @@ ${frontendUrl}
   private async syncCouponsForCourse(cursoId: number, nuevosCupones: any[]) {
     try {
       // Obtener cupones actuales del curso
-      const cuponesActuales = await this.couponsService.getCouponsByCourse(cursoId);
+      const cuponesActuales =
+        await this.couponsService.getCouponsByCourse(cursoId);
 
       // Crear mapas para comparación eficiente
-      const mapaActuales = new Map(cuponesActuales.map(c => [c.id, c]));
-      const mapaNuevos = new Map(nuevosCupones.filter(c => c.id).map(c => [c.id, c]));
-      const nuevosSinId = nuevosCupones.filter(c => !c.id);
+      const mapaActuales = new Map(cuponesActuales.map((c) => [c.id, c]));
+      const mapaNuevos = new Map(
+        nuevosCupones.filter((c) => c.id).map((c) => [c.id, c]),
+      );
+      const nuevosSinId = nuevosCupones.filter((c) => !c.id);
 
       // Identificar cupones a eliminar (están en actuales pero no en nuevos)
-      const cuponesAEliminar = cuponesActuales.filter(cupónActual =>
-        !mapaNuevos.has(cupónActual.id)
+      const cuponesAEliminar = cuponesActuales.filter(
+        (cupónActual) => !mapaNuevos.has(cupónActual.id),
       );
 
       // Identificar cupones a actualizar (están en ambos)
-      const cuponesAActualizar = nuevosCupones.filter(cupónNuevo =>
-        cupónNuevo.id && mapaActuales.has(cupónNuevo.id)
+      const cuponesAActualizar = nuevosCupones.filter(
+        (cupónNuevo) => cupónNuevo.id && mapaActuales.has(cupónNuevo.id),
       );
 
       // Procesar eliminaciones
       for (const cupon of cuponesAEliminar) {
         await this.couponsService.deleteCoupon(cupon.id);
-        this.logger.log(`🗑️ Cupón eliminado: ${cupon.codigo} (ID: ${cupon.id})`);
+        this.logger.log(
+          `🗑️ Cupón eliminado: ${cupon.codigo} (ID: ${cupon.id})`,
+        );
       }
 
       // Procesar actualizaciones
@@ -532,24 +601,32 @@ ${frontendUrl}
           codigo: cuponData.codigo,
           tipo: cuponData.tipo,
           usosMaximos: cuponData.usosMaximos,
-          fechaExpiracion: cuponData.fechaExpiracion
+          fechaExpiracion: cuponData.fechaExpiracion,
         });
-        this.logger.log(`✏️ Cupón actualizado: ${cuponData.codigo} (ID: ${cuponData.id})`);
+        this.logger.log(
+          `✏️ Cupón actualizado: ${cuponData.codigo} (ID: ${cuponData.id})`,
+        );
       }
 
       // Procesar nuevas creaciones
       for (const cuponData of nuevosSinId) {
         const cuponCreado = await this.couponsService.createCoupon({
           ...cuponData,
-          cursoId: cursoId
+          cursoId: cursoId,
         });
-        this.logger.log(`🆕 Cupón creado: ${cuponData.codigo} (ID: ${(cuponCreado as any).id})`);
+        this.logger.log(
+          `🆕 Cupón creado: ${cuponData.codigo} (ID: ${(cuponCreado as any).id})`,
+        );
       }
 
-      this.logger.log(`✅ Sincronización completada: ${cuponesAEliminar.length} eliminados, ${cuponesAActualizar.length} actualizados, ${nuevosSinId.length} creados para el curso ${cursoId}`);
-
+      this.logger.log(
+        `✅ Sincronización completada: ${cuponesAEliminar.length} eliminados, ${cuponesAActualizar.length} actualizados, ${nuevosSinId.length} creados para el curso ${cursoId}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Error en sincronización de cupones para curso ${cursoId}:`, error);
+      this.logger.error(
+        `❌ Error en sincronización de cupones para curso ${cursoId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -569,14 +646,15 @@ ${frontendUrl}
     await this.deactivateCouponsOnCourseArchive(id);
 
     const result = await this.repo.update(id, { activo: false });
-    if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
+    if (result.affected === 0)
+      throw new NotFoundException('Curso no encontrado');
 
     this.logger.log(`✅ Curso ${id} archivado y cupones desactivados`);
     return { success: true };
   }
   async misCursos(userId: number) {
     const inscritos = await this.studentCourseRepo.find({
-      where: { estudianteId: userId }
+      where: { estudianteId: userId },
     });
 
     const cursosIds = inscritos.map((x) => x.cursoId);
@@ -596,6 +674,7 @@ ${frontendUrl}
         'course.tipo',
         'course.cupos',
         'course.link',
+        'course.recursosLink',
         'course.precio',
         'course.fecha',
         'course.hora',
@@ -605,7 +684,7 @@ ${frontendUrl}
         'profesor.id',
         'profesor.nombres',
         'profesor.apellidos',
-        'profesor.asignatura'
+        'profesor.asignatura',
       ])
       .where('course.id IN (:...cursosIds)', { cursosIds })
       .getMany();
@@ -622,7 +701,7 @@ ${frontendUrl}
   async estudiantesCurso(cursoId: number) {
     const inscripciones = await this.studentCourseRepo.find({
       where: { cursoId },
-      relations: ['estudiante']
+      relations: ['estudiante'],
     });
 
     const estudianteIds = inscripciones.map((x) => x.estudianteId);
@@ -639,7 +718,7 @@ ${frontendUrl}
         'user.empresa',
         'user.cargo',
         'user.rol',
-        'user.activo'
+        'user.activo',
         // ❌ NO incluir: correo, usuario, cedula, celular, password, etc.
       ])
       .where('user.id IN (:...estudianteIds)', { estudianteIds })
@@ -661,6 +740,7 @@ ${frontendUrl}
         'course.tipo',
         'course.cupos',
         'course.link',
+        'course.recursosLink',
         'course.precio',
         'course.fecha',
         'course.hora',
@@ -677,14 +757,14 @@ ${frontendUrl}
       .getMany();
 
     const inscritos = await this.studentCourseRepo.find({
-      where: { estudianteId: userId }
+      where: { estudianteId: userId },
     });
 
     const pagosAprobados = await this.paymentAttemptRepo.find({
       where: {
         userId: userId,
-        status: 'Approved'
-      }
+        status: 'Approved',
+      },
     });
 
     const inscritosIds = inscritos.map((x) => x.cursoId);
@@ -701,10 +781,12 @@ ${frontendUrl}
         'cupones.activo',
         'cupones.usosActuales',
         'cupones.usosMaximos',
-        'cupones.fechaExpiracion'
+        'cupones.fechaExpiracion',
       ])
       .where('course.activo = :activo', { activo: true })
       .getMany();
+
+    // 🔧 REEMPLAZA TODO EL RETURN cursos.map() en cursosConEstadoInscrito
 
     return cursos.map((curso) => {
       const estaInscrito = inscritosIds.includes(curso.id);
@@ -712,36 +794,48 @@ ${frontendUrl}
 
       let linkAMostrar: string | null = null;
       let puedeVerLink = false;
+      let recursosLinkAMostrar: string | null = curso.recursosLink;
+      let puedeVerRecursos = estaInscrito;
+
+      // ============================================
+      // 🔥 LÓGICA CORREGIDA
+      // ============================================
+      // La clave es: Si está INSCRITO, puede ver el link
+      // No importa CÓMO se inscribió (gratis, pago, cupón)
 
       if (curso.tipo.includes('GRATIS') && estaInscrito) {
+        // Curso gratuito + inscrito = acceso completo
         linkAMostrar = curso.link;
         puedeVerLink = true;
-      } else if (curso.tipo.includes('PAGADO') && haPagado) {
+      } else if (curso.tipo.includes('PAGADO') && estaInscrito) {
         linkAMostrar = curso.link;
         puedeVerLink = true;
       }
 
-      // ✅ BUSCAR LOS CUPONES DEL CURSO ACTUAL EN LA CONSULTA SEPARADA
-      const cursoConCupones = cursosConCupones.find(c => c.id === curso.id);
-      const tieneCupones = cursoConCupones?.cupones?.some(cupon => {
-        const activo = cupon.activo !== false;
-        const usosDisponibles = cupon.usosActuales < cupon.usosMaximos;
-        const noExpirado = !cupon.fechaExpiracion || new Date() < new Date(cupon.fechaExpiracion);
-        return activo && usosDisponibles && noExpirado;
-      }) || false;
+      const cursoConCupones = cursosConCupones.find((c) => c.id === curso.id);
+      const tieneCupones =
+        cursoConCupones?.cupones?.some((cupon) => {
+          const activo = cupon.activo !== false;
+          const usosDisponibles = cupon.usosActuales < cupon.usosMaximos;
+          const noExpirado =
+            !cupon.fechaExpiracion ||
+            new Date() < new Date(cupon.fechaExpiracion);
+          return activo && usosDisponibles && noExpirado;
+        }) || false;
 
       return {
         ...curso,
         link: linkAMostrar,
         puedeVerLink: puedeVerLink,
+        recursosLink: recursosLinkAMostrar,
+        puedeVerRecursos: puedeVerRecursos,
         inscrito: estaInscrito,
         haPagado: haPagado,
         profesorNombre: curso.profesor
           ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
           : null,
         asignatura: curso.profesor ? curso.profesor.asignatura : null,
-        tieneCupones: tieneCupones, // ✅ SOLO EL BOOLEANO
-        // ❌ NO incluir la propiedad 'cupones'
+        tieneCupones: tieneCupones,
       };
     });
   }
@@ -787,6 +881,7 @@ ${frontendUrl}
           'course.tipo',
           'course.cupos',
           'course.link',
+          'course.recursosLink',
           'course.precio',
           'course.fecha',
           'course.hora',
@@ -824,6 +919,7 @@ ${frontendUrl}
         'course.tipo',
         'course.cupos',
         'course.link',
+        'course.recursosLink',
         'course.precio',
         'course.fecha',
         'course.hora',
@@ -848,7 +944,8 @@ ${frontendUrl}
     if (!course) throw new NotFoundException('Curso no encontrado');
 
     const result = await this.repo.update(id, { activo: true });
-    if (result.affected === 0) throw new NotFoundException('Curso no encontrado');
+    if (result.affected === 0)
+      throw new NotFoundException('Curso no encontrado');
 
     // Activar cupones al restaurar el curso
     await this.activateCouponsOnCourseRestore(id);
@@ -857,17 +954,22 @@ ${frontendUrl}
     return { success: true, message: 'Curso activado correctamente' };
   }
 
-
   // ===============================
   // ✅ DESACTIVAR CUPONES AL ARCHIVAR CURSO
   // ===============================
   async deactivateCouponsOnCourseArchive(cursoId: number) {
     try {
-      const result = await this.couponsService.deactivateAllCouponsByCourse(cursoId);
-      this.logger.log(`✅ Cupones desactivados para curso ${cursoId}: ${result.affected} cupones`);
+      const result =
+        await this.couponsService.deactivateAllCouponsByCourse(cursoId);
+      this.logger.log(
+        `✅ Cupones desactivados para curso ${cursoId}: ${result.affected} cupones`,
+      );
       return result;
     } catch (error) {
-      this.logger.error(`❌ Error desactivando cupones del curso ${cursoId}:`, error);
+      this.logger.error(
+        `❌ Error desactivando cupones del curso ${cursoId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -877,17 +979,25 @@ ${frontendUrl}
   // ===============================
   async activateCouponsOnCourseRestore(cursoId: number) {
     try {
-      const result = await this.couponsService.activateAllCouponsByCourse(cursoId);
-      this.logger.log(`✅ Cupones activados para curso ${cursoId}: ${result.affected} cupones`);
+      const result =
+        await this.couponsService.activateAllCouponsByCourse(cursoId);
+      this.logger.log(
+        `✅ Cupones activados para curso ${cursoId}: ${result.affected} cupones`,
+      );
       return result;
     } catch (error) {
-      this.logger.error(`❌ Error activando cupones del curso ${cursoId}:`, error);
+      this.logger.error(
+        `❌ Error activando cupones del curso ${cursoId}:`,
+        error,
+      );
       throw error;
     }
   }
 
   // En courses.service.ts - agregar este método
-  async deleteCoursePermanently(id: number): Promise<{ success: boolean; message: string }> {
+  async deleteCoursePermanently(
+    id: number,
+  ): Promise<{ success: boolean; message: string }> {
     try {
       const course = await this.findById(id);
       if (!course) {
@@ -906,27 +1016,32 @@ ${frontendUrl}
       // ✅ FINALMENTE ELIMINAR EL CURSO
       await this.repo.delete(id);
 
-      this.logger.log(`✅ Curso ${id} eliminado permanentemente con todos sus datos asociados`);
+      this.logger.log(
+        `✅ Curso ${id} eliminado permanentemente con todos sus datos asociados`,
+      );
       return {
         success: true,
-        message: 'Curso eliminado definitivamente junto con todos sus cupones, inscripciones y datos asociados'
+        message:
+          'Curso eliminado definitivamente junto con todos sus cupones, inscripciones y datos asociados',
       };
-
     } catch (error) {
       // Manejar error de violación de clave foránea
       if (error.code === '23503') {
         return {
           success: false,
-          message: 'No se puede eliminar el curso porque tiene información asociada que no se pudo eliminar automáticamente'
+          message:
+            'No se puede eliminar el curso porque tiene información asociada que no se pudo eliminar automáticamente',
         };
       }
 
-      this.logger.error(`❌ Error eliminando curso ${id} permanentemente:`, error);
+      this.logger.error(
+        `❌ Error eliminando curso ${id} permanentemente:`,
+        error,
+      );
       return {
         success: false,
-        message: 'Error interno del servidor al eliminar el curso'
+        message: 'Error interno del servidor al eliminar el curso',
       };
     }
   }
-
 }

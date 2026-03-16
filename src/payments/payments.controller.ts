@@ -9,7 +9,7 @@ import {
   Get,
   Query,
   Res,
-  Request
+  Request,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -54,7 +54,7 @@ export class PaymentsController {
   ) {
     this.notificationService = new PaymentNotificationService(
       mailService,
-      configService
+      configService,
     );
   }
 
@@ -65,11 +65,12 @@ export class PaymentsController {
   @Post('release-coupon-by-transaction')
   @UseGuards(JwtAuthGuard)
   async releaseCouponByTransaction(
-    @Body() body: {
+    @Body()
+    body: {
       clientTransactionId: string;
       // ❌ ELIMINAR userId del body
     },
-    @Request() req // ✅ AGREGAR Request para obtener userId del token
+    @Request() req, // ✅ AGREGAR Request para obtener userId del token
   ) {
     this.logger.log(`=== LIBERANDO CUPÓN POR TRANSACCIÓN ===`);
     this.logger.log(`Body recibido:`, body);
@@ -85,8 +86,8 @@ export class PaymentsController {
       const paymentAttempt = await this.paymentAttemptRepo.findOne({
         where: {
           clientTransactionId: body.clientTransactionId,
-          userId: userId // ✅ Usar userId del token
-        }
+          userId: userId, // ✅ Usar userId del token
+        },
       });
 
       if (!paymentAttempt) {
@@ -94,24 +95,25 @@ export class PaymentsController {
       }
 
       if (paymentAttempt.cuponReservaId) {
-        await this.couponsService.cancelCouponReservation(paymentAttempt.cuponReservaId);
-        this.logger.log(`✅ Cupón liberado - Reservation ID: ${paymentAttempt.cuponReservaId}`);
+        await this.couponsService.cancelCouponReservation(
+          paymentAttempt.cuponReservaId,
+        );
+        this.logger.log(
+          `✅ Cupón liberado - Reservation ID: ${paymentAttempt.cuponReservaId}`,
+        );
       }
 
       return {
         success: true,
-        message: 'Cupón liberado correctamente'
+        message: 'Cupón liberado correctamente',
       };
-
     } catch (error) {
       this.logger.error('ERROR LIBERANDO CUPÓN POR TRANSACCIÓN:', error);
       throw new BadRequestException(
-        error.message || 'Error al liberar el cupón'
+        error.message || 'Error al liberar el cupón',
       );
     }
   }
-
-
 
   // ===============================
   // ✅ MÉTODOS DE VALIDACIÓN DE SEGURIDAD
@@ -131,13 +133,21 @@ export class PaymentsController {
       return;
     }
 
-    throw new BadRequestException('No tienes permisos para acceder a esta información');
+    throw new BadRequestException(
+      'No tienes permisos para acceder a esta información',
+    );
   }
 
-  private async validateCourseAndUser(cursoId: number, userId: number, requestUser: any) {
+  private async validateCourseAndUser(
+    cursoId: number,
+    userId: number,
+    requestUser: any,
+  ) {
     // ✅ VALIDACIÓN SEGURA: Comparar el userId proporcionado con el del usuario autenticado
     if (userId !== requestUser.userId && requestUser.rol !== 'ADMIN') {
-      throw new BadRequestException('No tienes permisos para realizar esta acción');
+      throw new BadRequestException(
+        'No tienes permisos para realizar esta acción',
+      );
     }
 
     const course = await this.coursesService.findById(cursoId);
@@ -155,7 +165,7 @@ export class PaymentsController {
     }
 
     const yaInscrito = await this.studentCourseRepo.findOne({
-      where: { estudianteId: userId, cursoId }
+      where: { estudianteId: userId, cursoId },
     });
 
     if (yaInscrito) {
@@ -170,8 +180,8 @@ export class PaymentsController {
   // ===============================
   @Post('create-payphone-payment')
   async createPayphonePayment(
-    @Body() body: { cursoId: number; }, // ❌ ELIMINAR userId del body
-    @Request() req
+    @Body() body: { cursoId: number }, // ❌ ELIMINAR userId del body
+    @Request() req,
   ) {
     this.logger.log(`=== INICIO CREATE PAYPHONE PAYMENT ===`);
 
@@ -182,9 +192,11 @@ export class PaymentsController {
       const { course, usuario } = await this.validateCourseAndUser(
         body.cursoId,
         userId, // ✅ Usar userId del token
-        req.user
+        req.user,
       );
-      this.logger.log(`💰 PAGO CREADO PARA: ${usuario.correo} - Curso: ${course.titulo} - Precio: $${course.precio}`);
+      this.logger.log(
+        `💰 PAGO CREADO PARA: ${usuario.correo} - Curso: ${course.titulo} - Precio: $${course.precio}`,
+      );
       const clientTransactionId = `CURSO-${body.cursoId}-${userId}-${Date.now()}-${uuidv4().substring(0, 8)}`;
 
       const paymentAttempt = await this.paymentAttemptRepo.save({
@@ -192,10 +204,12 @@ export class PaymentsController {
         cursoId: body.cursoId,
         userId: userId, // ✅ Usar userId del token
         amount: course.precio,
-        status: 'PENDIENTE'
+        status: 'PENDIENTE',
       });
 
-      this.logger.log(`Creando pago Payphone para curso ${course.titulo} - Usuario: ${usuario.correo}`);
+      this.logger.log(
+        `Creando pago Payphone para curso ${course.titulo} - Usuario: ${usuario.correo}`,
+      );
 
       const paymentData = await this.payphoneService.createPayment(
         course.precio,
@@ -209,33 +223,33 @@ export class PaymentsController {
             nombres: usuario.nombres,
             apellidos: usuario.apellidos,
             celular: usuario.celular,
-            email: usuario.correo
-          }
-        }
+            email: usuario.correo,
+          },
+        },
       );
 
       return {
         success: true,
         paymentUrl: paymentData.paymentUrl,
         paymentId: paymentData.paymentId,
-        clientTransactionId: paymentData.clientTransactionId
+        clientTransactionId: paymentData.clientTransactionId,
       };
-
     } catch (error) {
       this.logger.error('ERROR EN CREATE PAYPHONE PAYMENT:', error);
       throw new BadRequestException(
-        error.message || 'Error al crear el pago con Payphone'
+        error.message || 'Error al crear el pago con Payphone',
       );
     }
   }
 
   @Post('create-payphone-payment-with-coupon')
   async createPayphonePaymentWithCoupon(
-    @Body() body: {
+    @Body()
+    body: {
       cursoId: number;
       codigoCupon: string;
     },
-    @Request() req
+    @Request() req,
   ) {
     this.logger.log(`=== INICIO CREATE PAYPHONE PAYMENT WITH COUPON ===`);
 
@@ -248,7 +262,7 @@ export class PaymentsController {
       const { course, usuario } = await this.validateCourseAndUser(
         body.cursoId,
         userId, // ✅ Usar userId del token, no del body
-        req.user
+        req.user,
       );
 
       if (!body.codigoCupon) {
@@ -259,7 +273,7 @@ export class PaymentsController {
       const cuponReserva = await this.couponsService.reserveCoupon(
         body.cursoId,
         body.codigoCupon,
-        userId // ✅ Usar userId del token
+        userId, // ✅ Usar userId del token
       );
 
       if (!cuponReserva.success) {
@@ -271,25 +285,32 @@ export class PaymentsController {
       // ✅ CALCULAR PRECIO CON DESCUENTO
       const precioConDescuento = this.calculateDiscountedPrice(
         course.precio,
-        cuponReserva.cupon.tipo
+        cuponReserva.cupon.tipo,
       );
 
       // ✅ NUEVO LOG CON CORREO Y CUPÓN
-      this.logger.log(`🎁 PAGO CON CUPÓN CREADO PARA: ${usuario.correo} - Curso: ${course.titulo}`);
-      this.logger.log(`   💰 Precio original: $${course.precio} → Precio con descuento: $${precioConDescuento}`);
-      this.logger.log(`   🎫 Cupón aplicado: ${body.codigoCupon} (${cuponReserva.cupon.tipo})`);
-
+      this.logger.log(
+        `🎁 PAGO CON CUPÓN CREADO PARA: ${usuario.correo} - Curso: ${course.titulo}`,
+      );
+      this.logger.log(
+        `   💰 Precio original: $${course.precio} → Precio con descuento: $${precioConDescuento}`,
+      );
+      this.logger.log(
+        `   🎫 Cupón aplicado: ${body.codigoCupon} (${cuponReserva.cupon.tipo})`,
+      );
 
       // ✅ SI ES GRATIS, CONFIRMAR INMEDIATAMENTE
       if (precioConDescuento === 0) {
-        this.logger.log(`🎉 INSCRIPCIÓN GRATIS CON CUPÓN: ${usuario.correo} - Curso: ${course.titulo}`);
+        this.logger.log(
+          `🎉 INSCRIPCIÓN GRATIS CON CUPÓN: ${usuario.correo} - Curso: ${course.titulo}`,
+        );
         return await this.processFreeCouponRegistration(
           body.cursoId,
           userId, // ✅ Usar userId del token
           course,
           usuario,
           reservationId,
-          cuponReserva
+          cuponReserva,
         );
       }
 
@@ -302,7 +323,7 @@ export class PaymentsController {
         userId: userId, // ✅ Usar userId del token
         amount: precioConDescuento,
         status: 'PENDIENTE_CON_CUPON',
-        cuponReservaId: reservationId
+        cuponReservaId: reservationId,
       });
 
       const paymentData = await this.payphoneService.createPayment(
@@ -320,9 +341,9 @@ export class PaymentsController {
             nombres: usuario.nombres,
             apellidos: usuario.apellidos,
             celular: usuario.celular,
-            email: usuario.correo
-          }
-        }
+            email: usuario.correo,
+          },
+        },
       );
 
       return {
@@ -335,9 +356,8 @@ export class PaymentsController {
         precioOriginal: course.precio,
         precioConDescuento,
         ahorro: course.precio - precioConDescuento,
-        reservationId
+        reservationId,
       };
-
     } catch (error) {
       this.logger.error('ERROR EN CREATE PAYPHONE PAYMENT WITH COUPON:', error);
 
@@ -351,7 +371,7 @@ export class PaymentsController {
       }
 
       throw new BadRequestException(
-        error.message || 'Error al crear el pago con cupón'
+        error.message || 'Error al crear el pago con cupón',
       );
     }
   }
@@ -364,27 +384,36 @@ export class PaymentsController {
   async payphoneConfirm(
     @Query('id') id: string,
     @Query('clientTransactionId') clientTransactionId: string,
-    @Res() res: Response
+    @Res() res: Response,
   ) {
     this.logger.log(`🔔 === CALLBACK PAYPHONE RECIBIDO ===`);
 
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
 
     try {
       if (!id || !clientTransactionId) {
         this.logger.error('❌ Parámetros faltantes en callback');
-        return res.redirect(`${frontendUrl}/pago-fallido?error=parametros_faltantes`);
+        return res.redirect(
+          `${frontendUrl}/pago-fallido?error=parametros_faltantes`,
+        );
       }
 
-      this.logger.log(`📞 Callback recibido - Payphone ID: ${id} - ClientTxId: ${clientTransactionId}`);
+      this.logger.log(
+        `📞 Callback recibido - Payphone ID: ${id} - ClientTxId: ${clientTransactionId}`,
+      );
 
       const paymentAttempt = await this.paymentAttemptRepo.findOne({
-        where: { clientTransactionId }
+        where: { clientTransactionId },
       });
 
       if (!paymentAttempt) {
-        this.logger.error(`❌ PaymentAttempt no encontrado para: ${clientTransactionId}`);
-        return res.redirect(`${frontendUrl}/pago-fallido?error=pago_no_encontrado`);
+        this.logger.error(
+          `❌ PaymentAttempt no encontrado para: ${clientTransactionId}`,
+        );
+        return res.redirect(
+          `${frontendUrl}/pago-fallido?error=pago_no_encontrado`,
+        );
       }
 
       // ✅ OBTENER INFO DEL USUARIO Y CURSO PARA LOGS DETALLADOS
@@ -393,90 +422,138 @@ export class PaymentsController {
 
       try {
         const usuario = await this.usersService.findById(paymentAttempt.userId);
-        const course = await this.coursesService.findById(paymentAttempt.cursoId);
+        const course = await this.coursesService.findById(
+          paymentAttempt.cursoId,
+        );
 
         userEmail = usuario ? usuario.correo : 'Email no disponible';
         courseName = course ? course.titulo : 'Curso no disponible';
 
-        this.logger.log(`👤 Información obtenida - Usuario: ${userEmail} - Curso: ${courseName} - Monto: $${paymentAttempt.amount}`);
+        this.logger.log(
+          `👤 Información obtenida - Usuario: ${userEmail} - Curso: ${courseName} - Monto: $${paymentAttempt.amount}`,
+        );
       } catch (infoError) {
-        this.logger.warn(`⚠️ No se pudo obtener información completa del usuario/curso: ${infoError.message}`);
+        this.logger.warn(
+          `⚠️ No se pudo obtener información completa del usuario/curso: ${infoError.message}`,
+        );
       }
 
       // ✅ PROTECCIÓN: Evitar doble procesamiento
-      if (paymentAttempt.status === 'Approved' || paymentAttempt.status === 'GRATIS_CON_CUPON') {
-        this.logger.warn(`⚠️ PAGO YA PROCESADO - Usuario: ${userEmail} - Curso: ${courseName} - ClientTxId: ${clientTransactionId}`);
-        return res.redirect(`${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}&already_processed=true`);
+      if (
+        paymentAttempt.status === 'Approved' ||
+        paymentAttempt.status === 'GRATIS_CON_CUPON'
+      ) {
+        this.logger.warn(
+          `⚠️ PAGO YA PROCESADO - Usuario: ${userEmail} - Curso: ${courseName} - ClientTxId: ${clientTransactionId}`,
+        );
+        return res.redirect(
+          `${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}&already_processed=true`,
+        );
       }
 
-      this.logger.log(`🔍 Verificando estado con Payphone... - Usuario: ${userEmail}`);
+      this.logger.log(
+        `🔍 Verificando estado con Payphone... - Usuario: ${userEmail}`,
+      );
 
       // ✅ VERIFICAR CON PAYPHONE
-      const confirmacionData = await this.payphoneService.confirmTransaction(id, clientTransactionId);
+      const confirmacionData = await this.payphoneService.confirmTransaction(
+        id,
+        clientTransactionId,
+      );
       const estadoReal = confirmacionData.transactionStatus;
 
-      this.logger.log(`📊 Estado Payphone: ${estadoReal} - Usuario: ${userEmail} - Curso: ${courseName}`);
+      this.logger.log(
+        `📊 Estado Payphone: ${estadoReal} - Usuario: ${userEmail} - Curso: ${courseName}`,
+      );
 
       await this.paymentAttemptRepo.update(paymentAttempt.id, {
         payphoneId: id,
         status: estadoReal,
         callbackData: JSON.stringify({
           ...confirmacionData,
-          verificadoEn: new Date().toISOString()
-        })
+          verificadoEn: new Date().toISOString(),
+        }),
       });
 
-      this.logger.log(`💾 Estado guardado en BD: ${estadoReal} - Usuario: ${userEmail}`);
+      this.logger.log(
+        `💾 Estado guardado en BD: ${estadoReal} - Usuario: ${userEmail}`,
+      );
 
       // ✅ PROCESAR SEGÚN ESTADO
       if (estadoReal === 'Approved') {
-        this.logger.log(`🎉 PAGO APROBADO - Usuario: ${userEmail} - Curso: ${courseName} - Monto: $${paymentAttempt.amount}`);
+        this.logger.log(
+          `🎉 PAGO APROBADO - Usuario: ${userEmail} - Curso: ${courseName} - Monto: $${paymentAttempt.amount}`,
+        );
 
         // ✅ LOG ESPECIAL PARA CUPONES
         if (paymentAttempt.cuponReservaId) {
-          this.logger.log(`🎁 PAGO CON CUPÓN EXITOSO - Usuario: ${userEmail} - Cupón aplicado`);
+          this.logger.log(
+            `🎁 PAGO CON CUPÓN EXITOSO - Usuario: ${userEmail} - Cupón aplicado`,
+          );
         }
 
         await this.processSuccessfulPayment(paymentAttempt);
-        this.logger.log(`✅ Procesamiento completado - Usuario: ${userEmail} - Inscripción confirmada`);
+        this.logger.log(
+          `✅ Procesamiento completado - Usuario: ${userEmail} - Inscripción confirmada`,
+        );
 
-        return res.redirect(`${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}`);
-
+        return res.redirect(
+          `${frontendUrl}/pago-exitoso?clientTransactionId=${clientTransactionId}`,
+        );
       } else if (this.isFailedPaymentStatus(estadoReal)) {
-        this.logger.warn(`❌ PAGO FALLIDO - Usuario: ${userEmail} - Curso: ${courseName} - Estado: ${estadoReal}`);
+        this.logger.warn(
+          `❌ PAGO FALLIDO - Usuario: ${userEmail} - Curso: ${courseName} - Estado: ${estadoReal}`,
+        );
 
         // ✅ LOG ESPECIAL PARA LIBERACIÓN DE CUPONES
         if (paymentAttempt.cuponReservaId) {
-          this.logger.log(`🔄 Liberando cupón por pago fallido - Usuario: ${userEmail}`);
+          this.logger.log(
+            `🔄 Liberando cupón por pago fallido - Usuario: ${userEmail}`,
+          );
         }
 
         await this.processFailedPayment(paymentAttempt, estadoReal);
-        this.logger.log(`✅ Procesamiento de fallo completado - Usuario: ${userEmail}`);
+        this.logger.log(
+          `✅ Procesamiento de fallo completado - Usuario: ${userEmail}`,
+        );
 
-        return res.redirect(`${frontendUrl}/pago-fallido?clientTransactionId=${clientTransactionId}&status=${estadoReal}`);
-
+        return res.redirect(
+          `${frontendUrl}/pago-fallido?clientTransactionId=${clientTransactionId}&status=${estadoReal}`,
+        );
       } else {
-        this.logger.log(`⏳ PAGO PENDIENTE - Usuario: ${userEmail} - Curso: ${courseName} - Estado: ${estadoReal}`);
-        return res.redirect(`${frontendUrl}/pago-pendiente?clientTransactionId=${clientTransactionId}&status=${estadoReal}`);
+        this.logger.log(
+          `⏳ PAGO PENDIENTE - Usuario: ${userEmail} - Curso: ${courseName} - Estado: ${estadoReal}`,
+        );
+        return res.redirect(
+          `${frontendUrl}/pago-pendiente?clientTransactionId=${clientTransactionId}&status=${estadoReal}`,
+        );
       }
-
     } catch (error) {
-      this.logger.error(`💥 Error CRÍTICO en callback - ClientTxId: ${clientTransactionId}:`, error);
+      this.logger.error(
+        `💥 Error CRÍTICO en callback - ClientTxId: ${clientTransactionId}:`,
+        error,
+      );
 
       // ✅ INTENTAR OBTENER MÁS INFORMACIÓN PARA EL LOG DE ERROR
       try {
         const paymentAttempt = await this.paymentAttemptRepo.findOne({
-          where: { clientTransactionId }
+          where: { clientTransactionId },
         });
         if (paymentAttempt) {
-          const usuario = await this.usersService.findById(paymentAttempt.userId);
-          this.logger.error(`💥 Error afectando al usuario: ${usuario?.correo || 'Desconocido'}`);
+          const usuario = await this.usersService.findById(
+            paymentAttempt.userId,
+          );
+          this.logger.error(
+            `💥 Error afectando al usuario: ${usuario?.correo || 'Desconocido'}`,
+          );
         }
       } catch (infoError) {
         // No hacer nada si falla la obtención de info adicional
       }
 
-      return res.redirect(`${frontendUrl}/pago-pendiente?error=error_procesamiento`);
+      return res.redirect(
+        `${frontendUrl}/pago-pendiente?error=error_procesamiento`,
+      );
     }
   }
 
@@ -487,7 +564,7 @@ export class PaymentsController {
   @Get('check-payment-status')
   async checkPaymentStatus(
     @Query('clientTransactionId') clientTransactionId: string,
-    @Request() req
+    @Request() req,
   ) {
     try {
       if (!clientTransactionId) {
@@ -495,7 +572,7 @@ export class PaymentsController {
       }
 
       const paymentAttempt = await this.paymentAttemptRepo.findOne({
-        where: { clientTransactionId }
+        where: { clientTransactionId },
       });
 
       if (!paymentAttempt) {
@@ -506,13 +583,14 @@ export class PaymentsController {
       this.validateUserAccess(req.user, paymentAttempt.userId);
 
       return {
-        success: paymentAttempt.status === 'Approved' || paymentAttempt.status === 'GRATIS_CON_CUPON',
+        success:
+          paymentAttempt.status === 'Approved' ||
+          paymentAttempt.status === 'GRATIS_CON_CUPON',
         status: paymentAttempt.status,
         paymentId: paymentAttempt.payphoneId,
         clientTransactionId: paymentAttempt.clientTransactionId,
-        amount: paymentAttempt.amount
+        amount: paymentAttempt.amount,
       };
-
     } catch (error) {
       this.logger.error(`Error verificando pago:`, error);
       return { success: false, error: 'Error verificando estado del pago' };
@@ -525,10 +603,7 @@ export class PaymentsController {
 
   @Post('inscribir-gratis')
   @UseGuards(JwtAuthGuard)
-  async inscribirGratis(
-    @Body() body: { cursoId: number; },
-    @Request() req
-  ) {
+  async inscribirGratis(@Body() body: { cursoId: number }, @Request() req) {
     this.logger.log(`🎓 === INICIO INSCRIPCIÓN GRATUITA ===`);
 
     try {
@@ -543,7 +618,7 @@ export class PaymentsController {
       const { course, usuario } = await this.validateCourseAndUser(
         body.cursoId,
         userId,
-        req.user
+        req.user,
       );
 
       // ✅ LOG INFORMATIVO DETALLADO
@@ -553,8 +628,13 @@ export class PaymentsController {
       this.logger.log(`   📞 Teléfono: ${usuario.celular || 'No disponible'}`);
 
       // ✅ ACTUALIZAR CUPOS
-      await this.coursesService.updateCupos(course.id, Math.max(0, course.cupos - 1));
-      this.logger.log(`   ✅ Cupos actualizados: ${course.cupos - 1} restantes`);
+      await this.coursesService.updateCupos(
+        course.id,
+        Math.max(0, course.cupos - 1),
+      );
+      this.logger.log(
+        `   ✅ Cupos actualizados: ${course.cupos - 1} restantes`,
+      );
 
       // ✅ CREAR INSCRIPCIÓN
       await this.studentCourseRepo.save({
@@ -576,8 +656,8 @@ export class PaymentsController {
         payphoneId: 'NO_PAYMENT_NEEDED',
         callbackData: JSON.stringify({
           mensaje: 'Inscripción gratuita directa',
-          timestamp: new Date().toISOString()
-        })
+          timestamp: new Date().toISOString(),
+        }),
       });
       this.logger.log(`   ✅ PaymentAttempt creado: ${clientTransactionId}`);
 
@@ -585,7 +665,11 @@ export class PaymentsController {
       this.logger.log(`   📧 Enviando notificaciones...`);
 
       try {
-        await this.notificationService.sendEnrollmentNotifications(course, usuario, 'Gratuito');
+        await this.notificationService.sendEnrollmentNotifications(
+          course,
+          usuario,
+          'Gratuito',
+        );
         this.logger.log(`   ✅ Notificaciones enviadas exitosamente`);
 
         // ✅ LOGS ESPECÍFICOS DE CADA NOTIFICACIÓN
@@ -594,11 +678,15 @@ export class PaymentsController {
         if (usuario.celular) {
           this.logger.log(`      📱 WhatsApp enviado a: ${usuario.celular}`);
         } else {
-          this.logger.log(`      ⚠️  No se envió WhatsApp: teléfono no disponible`);
+          this.logger.log(
+            `      ⚠️  No se envió WhatsApp: teléfono no disponible`,
+          );
         }
-
       } catch (notificationError) {
-        this.logger.error(`   ❌ Error enviando notificaciones:`, notificationError);
+        this.logger.error(
+          `   ❌ Error enviando notificaciones:`,
+          notificationError,
+        );
         // No lanzamos error aquí para no afectar la inscripción principal
       }
 
@@ -607,22 +695,23 @@ export class PaymentsController {
       return {
         success: true,
         message: 'Inscrito correctamente al curso gratuito',
-        clientTransactionId
+        clientTransactionId,
       };
-
     } catch (error) {
       this.logger.error(`❌ ERROR EN INSCRIPCIÓN GRATUITA:`, error);
 
       // ✅ LOG ADICIONAL DEL ERROR
       try {
         const userId = req.user.userId;
-        this.logger.error(`   👤 Error afectando al usuario ID: ${userId} - Curso ID: ${body?.cursoId}`);
+        this.logger.error(
+          `   👤 Error afectando al usuario ID: ${userId} - Curso ID: ${body?.cursoId}`,
+        );
       } catch (logError) {
         // No hacer nada si no se puede obtener info adicional
       }
 
       throw new BadRequestException(
-        error.message || 'Error al inscribirse al curso gratuito'
+        error.message || 'Error al inscribirse al curso gratuito',
       );
     }
   }
@@ -633,28 +722,35 @@ export class PaymentsController {
 
   @Post('verify-coupon')
   async verifyCoupon(
-    @Body() body: {
+    @Body()
+    body: {
       cursoId: number;
       codigoCupon: string;
       // ❌ ELIMINAR userId del body - usar siempre el del usuario autenticado
     },
-    @Request() req
+    @Request() req,
   ) {
     try {
       // ✅ USAR SIEMPRE EL USER ID DEL USUARIO AUTENTICADO
       const userId = req.user.userId;
 
       if (!body.cursoId || !body.codigoCupon) {
-        this.logger.warn(`❌ Parámetros faltantes en verify-coupon - Usuario ID: ${userId}`);
+        this.logger.warn(
+          `❌ Parámetros faltantes en verify-coupon - Usuario ID: ${userId}`,
+        );
         throw new BadRequestException('cursoId y codigoCupon son requeridos');
       }
 
       this.logger.log(`🔍 === INICIO VERIFICACIÓN DE CUPÓN ===`);
-      this.logger.log(`   👤 Usuario ID: ${userId} - Curso ID: ${body.cursoId} - Cupón: ${body.codigoCupon}`);
+      this.logger.log(
+        `   👤 Usuario ID: ${userId} - Curso ID: ${body.cursoId} - Cupón: ${body.codigoCupon}`,
+      );
 
       const course = await this.coursesService.findById(body.cursoId);
       if (!course) {
-        this.logger.error(`❌ Curso no encontrado - Curso ID: ${body.cursoId} - Usuario: ${userId}`);
+        this.logger.error(
+          `❌ Curso no encontrado - Curso ID: ${body.cursoId} - Usuario: ${userId}`,
+        );
         throw new BadRequestException('Curso no encontrado');
       }
 
@@ -664,44 +760,62 @@ export class PaymentsController {
         const usuario = await this.usersService.findById(userId);
         userEmail = usuario ? usuario.correo : 'Email no disponible';
       } catch (userError) {
-        this.logger.warn(`⚠️ No se pudo obtener email del usuario ID: ${userId}`);
+        this.logger.warn(
+          `⚠️ No se pudo obtener email del usuario ID: ${userId}`,
+        );
       }
 
-      this.logger.log(`🎯 Verificando cupón - Usuario: ${userEmail} - Curso: ${course.titulo} - Cupón: ${body.codigoCupon}`);
+      this.logger.log(
+        `🎯 Verificando cupón - Usuario: ${userEmail} - Curso: ${course.titulo} - Cupón: ${body.codigoCupon}`,
+      );
 
       const verificationResult = await this.couponsService.verifyCoupon(
         body.cursoId,
         body.codigoCupon,
-        userId // ✅ Usar el ID del usuario autenticado
+        userId, // ✅ Usar el ID del usuario autenticado
       );
 
       if (!verificationResult.valid || !verificationResult.cupon) {
-        this.logger.warn(`❌ CUPÓN INVÁLIDO - Usuario: ${userEmail} - Curso: ${course.titulo}`);
-        this.logger.warn(`   🎫 Cupón: ${body.codigoCupon} - Error: ${verificationResult.error}`);
+        this.logger.warn(
+          `❌ CUPÓN INVÁLIDO - Usuario: ${userEmail} - Curso: ${course.titulo}`,
+        );
+        this.logger.warn(
+          `   🎫 Cupón: ${body.codigoCupon} - Error: ${verificationResult.error}`,
+        );
 
         return {
           success: false,
-          error: verificationResult.error || 'Error al verificar cupón'
+          error: verificationResult.error || 'Error al verificar cupón',
         };
       }
 
       const precioConDescuento = this.calculateDiscountedPrice(
         course.precio,
-        verificationResult.cupon.tipo
+        verificationResult.cupon.tipo,
       );
 
       const ahorro = course.precio - precioConDescuento;
       const esGratis = precioConDescuento === 0;
 
       // ✅ LOG DETALLADO DE CUPÓN VÁLIDO
-      this.logger.log(`✅ CUPÓN VÁLIDO APLICADO - Usuario: ${userEmail} - Curso: ${course.titulo}`);
-      this.logger.log(`   🎫 Código: ${body.codigoCupon} - Tipo: ${verificationResult.cupon.tipo}`);
-      this.logger.log(`   💰 Precio: $${course.precio} → $${precioConDescuento} (Ahorro: $${ahorro})`);
+      this.logger.log(
+        `✅ CUPÓN VÁLIDO APLICADO - Usuario: ${userEmail} - Curso: ${course.titulo}`,
+      );
+      this.logger.log(
+        `   🎫 Código: ${body.codigoCupon} - Tipo: ${verificationResult.cupon.tipo}`,
+      );
+      this.logger.log(
+        `   💰 Precio: $${course.precio} → $${precioConDescuento} (Ahorro: $${ahorro})`,
+      );
 
       if (esGratis) {
-        this.logger.log(`   🎉 ¡CURSO GRATIS! - Cupón aplica 100% de descuento`);
+        this.logger.log(
+          `   🎉 ¡CURSO GRATIS! - Cupón aplica 100% de descuento`,
+        );
       } else {
-        this.logger.log(`   📊 Descuento: ${((ahorro / course.precio) * 100).toFixed(1)}% aplicado`);
+        this.logger.log(
+          `   📊 Descuento: ${((ahorro / course.precio) * 100).toFixed(1)}% aplicado`,
+        );
       }
 
       return {
@@ -711,23 +825,24 @@ export class PaymentsController {
         precioOriginal: course.precio,
         precioConDescuento,
         ahorro: ahorro,
-        gratis: esGratis
+        gratis: esGratis,
       };
-
     } catch (error) {
       this.logger.error(`💥 ERROR en verify-coupon:`, error);
 
       // ✅ LOG ADICIONAL DEL ERROR
       try {
         const userId = req.user.userId;
-        this.logger.error(`   👤 Error afectando al usuario ID: ${userId} - Curso ID: ${body?.cursoId}`);
+        this.logger.error(
+          `   👤 Error afectando al usuario ID: ${userId} - Curso ID: ${body?.cursoId}`,
+        );
       } catch (logError) {
         // No hacer nada si no se puede obtener info adicional
       }
 
       return {
         success: false,
-        error: error.message || 'Error al verificar cupón'
+        error: error.message || 'Error al verificar cupón',
       };
     }
   }
@@ -739,12 +854,13 @@ export class PaymentsController {
   @Post('force-release-coupon')
   @UseGuards(JwtAuthGuard)
   async forceReleaseCoupon(
-    @Body() body: {
+    @Body()
+    body: {
       codigoCupon: string;
       cursoId: number;
       // ❌ ELIMINAR userId del body
     },
-    @Request() req // ✅ AGREGAR Request
+    @Request() req, // ✅ AGREGAR Request
   ) {
     this.logger.log(`=== FORZANDO LIBERACIÓN DE CUPÓN ===`);
 
@@ -755,25 +871,26 @@ export class PaymentsController {
       const result = await this.couponsService.forceReleaseCoupon(
         body.codigoCupon,
         userId, // ✅ Usar del token
-        body.cursoId
+        body.cursoId,
       );
 
       return result;
-
     } catch (error) {
       this.logger.error('ERROR FORZANDO LIBERACIÓN:', error);
       throw new BadRequestException(
-        error.message || 'Error al forzar liberación del cupón'
+        error.message || 'Error al forzar liberación del cupón',
       );
     }
   }
 
   @Get('debug-payment')
   @Roles('ADMIN')
-  async debugPayment(@Query('clientTransactionId') clientTransactionId: string) {
+  async debugPayment(
+    @Query('clientTransactionId') clientTransactionId: string,
+  ) {
     try {
       const paymentAttempt = await this.paymentAttemptRepo.findOne({
-        where: { clientTransactionId }
+        where: { clientTransactionId },
       });
 
       if (!paymentAttempt) {
@@ -783,7 +900,9 @@ export class PaymentsController {
       return {
         success: true,
         data: paymentAttempt,
-        callbackData: paymentAttempt.callbackData ? JSON.parse(paymentAttempt.callbackData) : null
+        callbackData: paymentAttempt.callbackData
+          ? JSON.parse(paymentAttempt.callbackData)
+          : null,
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -795,7 +914,10 @@ export class PaymentsController {
   async cleanupExpiredReservations() {
     try {
       await this.couponsService.cleanupExpiredReservations();
-      return { success: true, message: 'Limpieza de reservas expiradas completada' };
+      return {
+        success: true,
+        message: 'Limpieza de reservas expiradas completada',
+      };
     } catch (error) {
       this.logger.error('Error en limpieza de reservas:', error);
       throw new BadRequestException('Error al limpiar reservas expiradas');
@@ -806,7 +928,10 @@ export class PaymentsController {
   // ✅ MÉTODOS PRIVADOS AUXILIARES
   // ===============================
 
-  private calculateDiscountedPrice(precioOriginal: number, tipoCupon: string): number {
+  private calculateDiscountedPrice(
+    precioOriginal: number,
+    tipoCupon: string,
+  ): number {
     switch (tipoCupon) {
       case 'PORCENTAJE_10':
         return precioOriginal * 0.9;
@@ -833,12 +958,17 @@ export class PaymentsController {
     course: any,
     usuario: any,
     reservationId: number,
-    cuponReserva: any
+    cuponReserva: any,
   ) {
-    this.logger.log(`🎁 Cupón GRATIS detectado - Confirmando e inscribiendo directamente`);
+    this.logger.log(
+      `🎁 Cupón GRATIS detectado - Confirmando e inscribiendo directamente`,
+    );
 
     await this.couponsService.confirmCouponUsage(reservationId);
-    await this.coursesService.updateCupos(course.id, Math.max(0, course.cupos - 1));
+    await this.coursesService.updateCupos(
+      course.id,
+      Math.max(0, course.cupos - 1),
+    );
 
     await this.studentCourseRepo.save({
       estudianteId: userId,
@@ -858,19 +988,23 @@ export class PaymentsController {
       cuponReservaId: reservationId,
       callbackData: JSON.stringify({
         cupon: cuponReserva.cupon,
-        mensaje: 'Inscripción gratuita mediante cupón'
-      })
+        mensaje: 'Inscripción gratuita mediante cupón',
+      }),
     });
 
     // ✅ ENVIAR NOTIFICACIONES
-    await this.notificationService.sendEnrollmentNotifications(course, usuario, 'Cupón Gratis');
+    await this.notificationService.sendEnrollmentNotifications(
+      course,
+      usuario,
+      'Cupón Gratis',
+    );
 
     return {
       success: true,
       gratis: true,
       message: '¡Inscripción exitosa con cupón gratis!',
       cupon: cuponReserva.cupon,
-      clientTransactionId
+      clientTransactionId,
     };
   }
 
@@ -880,7 +1014,9 @@ export class PaymentsController {
     // ✅ CONFIRMAR USO DEL CUPÓN SI EXISTE RESERVA
     if (paymentAttempt.cuponReservaId) {
       try {
-        await this.couponsService.confirmCouponUsage(paymentAttempt.cuponReservaId);
+        await this.couponsService.confirmCouponUsage(
+          paymentAttempt.cuponReservaId,
+        );
       } catch (error) {
         this.logger.error(`❌ Error confirmando cupón:`, error);
       }
@@ -896,11 +1032,17 @@ export class PaymentsController {
 
     // Evitar doble inscripción
     const yaInscrito = await this.studentCourseRepo.findOne({
-      where: { estudianteId: paymentAttempt.userId, cursoId: paymentAttempt.cursoId }
+      where: {
+        estudianteId: paymentAttempt.userId,
+        cursoId: paymentAttempt.cursoId,
+      },
     });
 
     if (!yaInscrito) {
-      await this.coursesService.updateCupos(course.id, Math.max(0, course.cupos - 1));
+      await this.coursesService.updateCupos(
+        course.id,
+        Math.max(0, course.cupos - 1),
+      );
       await this.studentCourseRepo.save({
         estudianteId: paymentAttempt.userId,
         cursoId: paymentAttempt.cursoId,
@@ -909,17 +1051,28 @@ export class PaymentsController {
     }
 
     // ✅ ENVIAR NOTIFICACIONES
-    const metodoPago = paymentAttempt.cuponReservaId ? 'Payphone con Cupón' : 'Payphone';
-    await this.notificationService.sendEnrollmentNotifications(course, estudiante, metodoPago);
+    const metodoPago = paymentAttempt.cuponReservaId
+      ? 'Payphone con Cupón'
+      : 'Payphone';
+    await this.notificationService.sendEnrollmentNotifications(
+      course,
+      estudiante,
+      metodoPago,
+    );
   }
 
-  private async processFailedPayment(paymentAttempt: PaymentAttempt, estado: string) {
+  private async processFailedPayment(
+    paymentAttempt: PaymentAttempt,
+    estado: string,
+  ) {
     this.logger.warn(`❌ Pago fallido - Estado: ${estado}`);
 
     // ✅ LIBERAR CUPÓN
     if (paymentAttempt.cuponReservaId) {
       try {
-        await this.couponsService.cancelCouponReservation(paymentAttempt.cuponReservaId);
+        await this.couponsService.cancelCouponReservation(
+          paymentAttempt.cuponReservaId,
+        );
       } catch (error) {
         this.logger.error(`❌ Error liberando cupón:`, error);
       }
@@ -939,100 +1092,139 @@ class PaymentNotificationService {
 
   constructor(
     private mailService: MailService,
-    private configService: ConfigService
+    private configService: ConfigService,
   ) {
-    this.notificacionesInscripciones = this.configService.get<string>('NOTIFICACIONES_INSCRIPCIONES') || 'cursos@rednuevaconexion.net';
-    this.alertasSistema = this.configService.get<string>('ALERTAS_SISTEMA') || 'cursos@rednuevaconexion.net';
-    this.correoSoporte = this.configService.get<string>('CORREO_SOPORTE') || 'vzamora@maat.ec';
-    this.telefonoSoporte = this.configService.get<string>('TELEFONO_SOPORTE') || '0986819378';
+    this.notificacionesInscripciones =
+      this.configService.get<string>('NOTIFICACIONES_INSCRIPCIONES') ||
+      'cursos@rednuevaconexion.net';
+    this.alertasSistema =
+      this.configService.get<string>('ALERTAS_SISTEMA') ||
+      'cursos@rednuevaconexion.net';
+    this.correoSoporte =
+      this.configService.get<string>('CORREO_SOPORTE') || 'vzamora@maat.ec';
+    this.telefonoSoporte =
+      this.configService.get<string>('TELEFONO_SOPORTE') || '0986819378';
 
     const correosExtra = this.configService.get<string>('CORREOS_ADMIN_EXTRA');
-    this.correosAdminExtra = correosExtra ? correosExtra.split(',').map(email => email.trim()) : [];
+    this.correosAdminExtra = correosExtra
+      ? correosExtra.split(',').map((email) => email.trim())
+      : [];
   }
 
-  async sendEnrollmentNotifications(course: any, student: any, paymentMethod: string) {
+  async sendEnrollmentNotifications(
+    course: any,
+    student: any,
+    paymentMethod: string,
+  ) {
     try {
       // ✅ ENVÍO INDEPENDIENTE - WhatsApp se envía aunque falle el email
-      const emailPromise = this.sendStudentEmail(course, student, paymentMethod)
-        .catch(error => {
-          console.error('❌ Error enviando email, pero continuando con WhatsApp:', error.message);
-          return null; // Retornar null para indicar fallo
-        });
+      const emailPromise = this.sendStudentEmail(
+        course,
+        student,
+        paymentMethod,
+      ).catch((error) => {
+        console.error(
+          '❌ Error enviando email, pero continuando con WhatsApp:',
+          error.message,
+        );
+        return null; // Retornar null para indicar fallo
+      });
 
-      const whatsappPromise = this.sendStudentWhatsApp(course, student, paymentMethod)
-        .catch(error => {
-          console.error('❌ Error enviando WhatsApp:', error.message);
-          return null; // Retornar null para indicar fallo
-        });
+      const whatsappPromise = this.sendStudentWhatsApp(
+        course,
+        student,
+        paymentMethod,
+      ).catch((error) => {
+        console.error('❌ Error enviando WhatsApp:', error.message);
+        return null; // Retornar null para indicar fallo
+      });
 
-      const adminPromise = this.sendAdminNotification(course, student, paymentMethod)
-        .catch(error => {
-          console.error('❌ Error enviando notificación admin:', error.message);
-          return null; // Retornar null para indicar fallo
-        });
+      const adminPromise = this.sendAdminNotification(
+        course,
+        student,
+        paymentMethod,
+      ).catch((error) => {
+        console.error('❌ Error enviando notificación admin:', error.message);
+        return null; // Retornar null para indicar fallo
+      });
 
       // ✅ ESPERAR TODAS LAS PROMESAS INDEPENDIENTEMENTE
-      const resultados = await Promise.allSettled([emailPromise, whatsappPromise, adminPromise]);
+      const resultados = await Promise.allSettled([
+        emailPromise,
+        whatsappPromise,
+        adminPromise,
+      ]);
 
       // ✅ LOG DEL RESULTADO DETALLADO
       console.log(`📊 Resumen notificaciones para ${student.correo}:`);
-      console.log(`   📧 Email: ${resultados[0].status === 'fulfilled' && resultados[0].value !== null ? '✅ Enviado' : '❌ Falló'}`);
-      console.log(`   📱 WhatsApp: ${resultados[1].status === 'fulfilled' && resultados[1].value !== null ? '✅ Enviado' : '❌ Falló'}`);
-      console.log(`   👨‍💼 Admin: ${resultados[2].status === 'fulfilled' && resultados[2].value !== null ? '✅ Enviado' : '❌ Falló'}`);
-
+      console.log(
+        `   📧 Email: ${resultados[0].status === 'fulfilled' && resultados[0].value !== null ? '✅ Enviado' : '❌ Falló'}`,
+      );
+      console.log(
+        `   📱 WhatsApp: ${resultados[1].status === 'fulfilled' && resultados[1].value !== null ? '✅ Enviado' : '❌ Falló'}`,
+      );
+      console.log(
+        `   👨‍💼 Admin: ${resultados[2].status === 'fulfilled' && resultados[2].value !== null ? '✅ Enviado' : '❌ Falló'}`,
+      );
     } catch (error) {
       console.error('💥 Error crítico en sistema de notificaciones:', error);
     }
   }
 
-  private async sendStudentEmail(course: any, student: any, paymentMethod: string) {
-    try {
-      const profesorNombre = course.profesor ?
-        `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
+  // En payments.controller.ts - Clase PaymentNotificationService
 
-      // ✅ OBTENER EL LINK ESPECÍFICO DEL CURSO PARA INSCRITOS
+  private async sendStudentEmail(
+    course: any,
+    student: any,
+    paymentMethod: string,
+  ) {
+    try {
+      const profesorNombre = course.profesor
+        ? `${course.profesor.nombres} ${course.profesor.apellidos}`
+        : 'Por confirmar';
+
       const linkCurso = course.link || 'Link por confirmar';
       const tieneLinkDisponible = !!course.link;
 
+      // ✅ SOLO AQUÍ SE ENVÍAN LOS RECURSOS (cuando ya está inscrito)
+      const recursosHTML = course.recursosLink
+        ? `
+      <div style="margin-top: 20px; padding: 15px; background: #e8f4fd; border-radius: 8px; border-left: 4px solid #3b82f6;">
+        <h4 style="margin: 0 0 10px 0; color: #1e40af;">📚 Recursos del Curso</h4>
+        <p style="margin: 5px 0;">
+          <a href="${course.recursosLink}" 
+             style="color: #2563eb; text-decoration: underline; word-break: break-all;">
+            ${course.recursosLink}
+          </a>
+        </p>
+        <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">
+          ⬆️ Accede a materiales, presentaciones y documentos exclusivos para inscritos
+        </p>
+      </div>
+    `
+        : '';
+
       const emailContent = `
       <div style="font-family: Arial, sans-serif; color:#222;">
-        <h2>¡Inscripción confirmada!</h2>
+        <h2>🎉 ¡Inscripción confirmada!</h2>
         <p>Hola <b>${student.nombres}</b>,<br>
         Te confirmamos tu inscripción al siguiente curso:</p>
-        <ul>
-          <li><b>Curso:</b> ${course.titulo}</li>
-          <li><b>Descripción:</b> ${course.descripcion}</li>
-          <li><b>Fecha:</b> ${course.fecha ? new Date(course.fecha).toLocaleDateString() : 'Por confirmar'}</li>
-          <li><b>Hora:</b> ${course.hora ? course.hora : 'Por confirmar'}</li>
-          <li><b>Docente:</b> ${profesorNombre}</li>
-          <li><b>Precio pagado:</b> $${course.precio || 0} (${paymentMethod})</li>
-          ${tieneLinkDisponible ? `<li><b>🔗 Link del curso:</b> <a href="${linkCurso}">${linkCurso}</a></li>` : ''}
-        </ul>
         
-        ${tieneLinkDisponible ? `
-        <div style="text-align: center; margin: 20px 0;">
-          <a href="${linkCurso}" 
-             style="background: #2563eb; color: white; padding: 12px 30px; 
-                    text-decoration: none; border-radius: 6px; font-weight: bold;
-                    display: inline-block;">
-            🚀 Acceder al Curso
-          </a>
+        <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
+          <h3 style="margin: 0 0 10px 0; color: #0369a1;">${course.titulo}</h3>
+          <p style="margin: 5px 0;"><b>📖</b> ${course.descripcion}</p>
+          <p style="margin: 5px 0;"><b>📅</b> ${course.fecha ? new Date(course.fecha).toLocaleDateString() : 'Por confirmar'} | <b>🕐</b> ${course.hora || 'Por confirmar'}</p>
+          <p style="margin: 5px 0;"><b>👨‍🏫</b> ${profesorNombre}</p>
+          <p style="margin: 5px 0;"><b>💰</b> $${course.precio || 0} (${paymentMethod})</p>
+          ${tieneLinkDisponible ? `<p style="margin: 5px 0;"><b>🔗</b> <a href="${linkCurso}">Acceder a la clase</a></p>` : ''}
         </div>
-        ` : `
-        <div style="background: #fef3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
-          <p style="margin: 0; color: #856404;">
-            <b>📝 Nota:</b> El link del curso será proporcionado próximamente.
-          </p>
-        </div>
-        `}
+        
+        ${recursosHTML}  <!-- ✅ RECURSOS SOLO PARA INSCRITOS -->
         
         <div style="margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 5px;">
-          <h3 style="margin-top: 0;">¿Necesitas ayuda?</h3>
-          <p>Contáctanos por cualquier duda:</p>
-          <ul>
-            <li><b>📞 Teléfono:</b> ${this.telefonoSoporte}</li>
-            <li><b>✉️ Email:</b> <a href="mailto:${this.correoSoporte}">${this.correoSoporte}</a></li>
-          </ul>
+          <h4 style="margin: 0 0 10px 0;">📞 ¿Necesitas ayuda?</h4>
+          <p style="margin: 5px 0;"><b>Teléfono:</b> ${this.telefonoSoporte}</p>
+          <p style="margin: 5px 0;"><b>Email:</b> <a href="mailto:${this.correoSoporte}">${this.correoSoporte}</a></p>
         </div>
         
         <br>
@@ -1044,37 +1236,51 @@ class PaymentNotificationService {
 
       await this.mailService.sendMail(
         student.correo,
-        'Confirmación de inscripción al curso',
-        emailContent
+        '🎉 Confirmación de inscripción al curso',
+        emailContent,
       );
 
-      console.log(`✅ Email enviado exitosamente a: ${student.correo}`);
-      return true; // Indicar éxito
-
+      console.log(`✅ Email de inscripción enviado a: ${student.correo}`);
+      return true;
     } catch (error) {
-      console.error(`❌ FALLO CRÍTICO enviando email a ${student.correo}:`, error.message);
-      throw error; // Relanzar para manejo externo
+      console.error(
+        `❌ Error enviando email a ${student.correo}:`,
+        error.message,
+      );
+      throw error;
     }
   }
 
-  private async sendStudentWhatsApp(course: any, student: any, paymentMethod: string) {
+  private async sendStudentWhatsApp(
+    course: any,
+    student: any,
+    paymentMethod: string,
+  ) {
     if (!student.celular) {
-      console.log(`⚠️ No se envía WhatsApp: teléfono no disponible para ${student.correo}`);
+      console.log(
+        `⚠️ No se envía WhatsApp: teléfono no disponible para ${student.correo}`,
+      );
       return null;
     }
 
     try {
-      const profesorNombre = course.profesor ?
-        `${course.profesor.nombres} ${course.profesor.apellidos}` : 'Por confirmar';
+      const profesorNombre = course.profesor
+        ? `${course.profesor.nombres} ${course.profesor.apellidos}`
+        : 'Por confirmar';
 
-      // ✅ OBTENER EL LINK ESPECÍFICO DEL CURSO PARA INSCRITOS
       const linkCurso = course.link || 'Por confirmar';
       const tieneLinkDisponible = !!course.link;
 
-      const mensaje = `¡Inscripción confirmada!
-Hola ${student.nombres},
+      // ✅ RECURSOS SOLO PARA INSCRITOS
+      const recursosTexto = course.recursosLink
+        ? `\n📚 *Recursos exclusivos:*\n${course.recursosLink}`
+        : '';
 
-Te confirmamos tu inscripción al curso: 
+      const mensaje = `🎉 *¡INSCRIPCIÓN CONFIRMADA!* 
+
+Hola ${student.nombres} 👋
+
+Te confirmamos tu inscripción al curso:
 📚 *${course.titulo}*
 
 📖 ${course.descripcion}
@@ -1085,26 +1291,31 @@ Te confirmamos tu inscripción al curso:
 💰 *Precio:* $${course.precio || 0}
 🎫 *Método:* ${paymentMethod}
 
-${tieneLinkDisponible ? `🔗 *Link del curso:* ${linkCurso}` : `📝 *Nota:* El link del curso será proporcionado próximamente`}
+${tieneLinkDisponible ? `🔗 *Link de la clase:* ${linkCurso}` : ''}
+${recursosTexto}
 
-¿Necesitas ayuda? Contáctanos:
-📞 Soporte: ${this.telefonoSoporte}
-✉️ Email: ${this.correoSoporte}
+📞 *Soporte:* ${this.telefonoSoporte}
+✉️ *Email:* ${this.correoSoporte}
 
-¡Nos vemos en el curso!`;
+¡Nos vemos en el curso! 🚀`;
 
       await this.sendWhatsApp(student.celular, mensaje);
-      console.log(`✅ WhatsApp enviado exitosamente a: ${student.celular}`);
-      return true; // Indicar éxito
-
+      console.log(`✅ WhatsApp de inscripción enviado a: ${student.celular}`);
+      return true;
     } catch (error) {
-      console.error(`❌ FALLO enviando WhatsApp a ${student.celular}:`, error.message);
-      // NO relanzamos el error para que no afecte otras notificaciones
+      console.error(
+        `❌ Error enviando WhatsApp a ${student.celular}:`,
+        error.message,
+      );
       return null;
     }
   }
 
-  private async sendAdminNotification(course: any, student: any, paymentMethod: string) {
+  private async sendAdminNotification(
+    course: any,
+    student: any,
+    paymentMethod: string,
+  ) {
     const asuntoAdmin = `Nuevo inscrito: ${course.titulo} (${paymentMethod})`;
     const mensajeAdmin = `
       <div style="font-family: Arial, sans-serif; color:#222;">
@@ -1125,7 +1336,7 @@ ${tieneLinkDisponible ? `🔗 *Link del curso:* ${linkCurso}` : `📝 *Nota:* El
     // Enviar a todos los correos admin
     const destinatarios = new Set([
       this.notificacionesInscripciones,
-      ...this.correosAdminExtra
+      ...this.correosAdminExtra,
     ]);
 
     for (const email of destinatarios) {

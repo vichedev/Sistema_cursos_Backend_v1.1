@@ -14,7 +14,7 @@ import * as crypto from 'crypto';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
@@ -41,7 +41,7 @@ export class AuthService {
         throw new BadRequestException('Cédula ya existe');
       }
 
-      const { rol: cargo, ...rest } = data;
+      const { ...rest } = data;
 
       // Generar token de verificación
       verificationToken = crypto.randomBytes(32).toString('hex');
@@ -49,8 +49,8 @@ export class AuthService {
       const userData: Partial<User> = {
         ...rest,
         password: data.password,
-        rol: 'ESTUDIANTE' as Rol,
-        cargo,
+        rol: 'ESTUDIANTE' as Rol,  // ← Esto es para ADMIN/ESTUDIANTE
+        cargo: data.cargo,          // ← Esto es para Gerente/Técnico
         emailVerified: false,
         emailVerificationToken: verificationToken,
         emailVerificationSentAt: new Date()

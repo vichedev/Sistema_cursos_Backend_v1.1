@@ -29,6 +29,10 @@ export class Course {
   @Column({ nullable: true })
   link: string;
 
+  // ✅ NUEVO CAMPO: Link de recursos del curso
+  @Column({ nullable: true })
+  recursosLink: string;
+
   @Column({ default: 0 })
   precio: number;
 
@@ -39,7 +43,7 @@ export class Course {
   hora: string;
 
   // Relación ManyToOne hacia User (profesor) - AGREGAR onDelete
-  @ManyToOne(() => User, (user) => user.cursosDictados, { 
+  @ManyToOne(() => User, (user) => user.cursosDictados, {
     nullable: true,
     onDelete: 'SET NULL'
   })

@@ -25,8 +25,13 @@ export class User {
   @Column({ unique: true })
   cedula: string;
 
+  // ✅ CELULAR: Guarda formato internacional completo (+593991234567)
   @Column()
   celular: string;
+
+  // ✅ NUEVO: País del usuario (EC, CO, AR, etc.)
+  @Column({ nullable: true })
+  pais: string;
 
   @Column()
   password: string;
@@ -41,12 +46,11 @@ export class User {
   empresa?: string;
 
   @Column({ nullable: true })
-  cargo: string;
+  cargo: string;  // ← "Gerente" o "Técnico"
 
   @Column({ nullable: true })
   asignatura?: string;
 
-  // Campos para verificación de correo
   @Column({ default: false })
   emailVerified: boolean;
 
@@ -56,7 +60,6 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   emailVerificationSentAt?: Date | null;
 
-  // ✅ NUEVO CAMPO PARA SOFT DELETE
   @Column({ default: true })
   activo: boolean;
 

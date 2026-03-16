@@ -4,7 +4,7 @@ FROM node:20-alpine
 RUN apk add --no-cache tzdata
 ENV TZ=America/Guayaquil
 
-# Usar UID 1001 y GID 1001 (sin conflictos)
+# Usar UID 1001 y GID 1001 
 ARG USER_ID=1001
 ARG GROUP_ID=1001
 
