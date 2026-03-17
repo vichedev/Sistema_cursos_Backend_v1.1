@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, BadRequestException, NotFoundException, ForbiddenException, Logger, Inject } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm'; // ✅ AGREGAR
-import { Repository } from 'typeorm'; // ✅ AGREGAR
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -8,7 +8,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User, Rol } from '../users/user.entity';
 import { MailQueueService } from '../common/mail-queue.service';
-import { MailService } from '../common/mail.service'; // ✅ AGREGAR
+import { MailService } from '../common/mail.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -19,8 +19,8 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private mailQueueService: MailQueueService,
-    @InjectRepository(User) private userRepo: Repository<User>, // ✅ AGREGAR
-    private mailService: MailService // ✅ AGREGAR
+    @InjectRepository(User) private userRepo: Repository<User>,
+    private mailService: MailService
   ) { }
 
   async register(data: RegisterDto) {
@@ -30,7 +30,6 @@ export class AuthService {
     try {
       console.log('🔵 INICIANDO REGISTRO para:', data.correo);
 
-      // Verificar duplicados
       if (await this.usersService.findByUsuario(data.usuario)) {
         throw new BadRequestException('Usuario ya existe');
       }
@@ -43,20 +42,18 @@ export class AuthService {
 
       const { ...rest } = data;
 
-      // Generar token de verificación
       verificationToken = crypto.randomBytes(32).toString('hex');
 
       const userData: Partial<User> = {
         ...rest,
         password: data.password,
-        rol: 'ESTUDIANTE' as Rol,  // ← Esto es para ADMIN/ESTUDIANTE
-        cargo: data.cargo,          // ← Esto es para Gerente/Técnico
+        rol: 'ESTUDIANTE' as Rol,
+        cargo: data.cargo,
         emailVerified: false,
         emailVerificationToken: verificationToken,
         emailVerificationSentAt: new Date()
       };
 
-      // ✅ CREAR USUARIO
       user = await this.usersService.create(userData);
       console.log('🟢 USUARIO CREADO - ID:', user.id);
 
@@ -65,7 +62,6 @@ export class AuthService {
       throw error;
     }
 
-    // ✅ USAR COLA EN LUGAR DE ENVÍO DIRECTO
     console.log('📧 AGREGANDO CORREO A COLA...');
 
     this.mailQueueService.addToQueue(
@@ -93,7 +89,6 @@ export class AuthService {
       throw new NotFoundException('Token de verificación inválido o ya utilizado');
     }
 
-    // Verificar expiración (24 horas)
     if (user.emailVerificationSentAt) {
       const sentTime = new Date(user.emailVerificationSentAt).getTime();
       const now = new Date().getTime();
@@ -104,7 +99,6 @@ export class AuthService {
       }
     }
 
-    // Actualizar usuario como verificado
     user.emailVerified = true;
     user.emailVerificationToken = null;
 
@@ -123,7 +117,6 @@ export class AuthService {
       throw new BadRequestException('El correo ya ha sido verificado');
     }
 
-    // Generar nuevo token
     const verificationToken = crypto.randomBytes(32).toString('hex');
 
     user.emailVerificationToken = verificationToken;
@@ -131,7 +124,6 @@ export class AuthService {
 
     await this.usersService.save(user);
 
-    // ✅ USAR COLA TAMBIÉN PARA REENVÍOS
     console.log('📧 REENVÍO - Agregando a cola...');
     this.mailQueueService.addToQueue(
       user.correo,
@@ -143,7 +135,6 @@ export class AuthService {
   }
 
   async login(data: LoginDto) {
-    // Buscar por usuario O correo
     const user = await this.usersService.findByUsuario(data.usuario) ||
       await this.usersService.findByCorreo(data.usuario);
 
@@ -151,14 +142,12 @@ export class AuthService {
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
-    // Verificar el hash
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
-    // Verificar si el correo está verificado
     if (!user.emailVerified) {
       throw new ForbiddenException('Cuenta no verificada. Por favor verifica tu correo electrónico antes de iniciar sesión.');
     }
@@ -168,44 +157,38 @@ export class AuthService {
       rol: user.rol
     };
 
-    // ✅ RESPUESTA SEGURA - Solo datos necesarios
     return {
       token: this.jwtService.sign(payload),
       rol: user.rol,
       cargo: user.cargo,
-      usuario: user.usuario, // ✅ Necesario para el frontend
+      usuario: user.usuario,
       nombres: user.nombres,
       userId: user.id,
-      // ❌ NO incluir: password, cedula, celular, correo, etc.
     };
   }
 
   async verifyUserManually(userId: number) {
     this.logger.log(`🔧 Verificación manual solicitada para usuario ID: ${userId}`);
 
-    // ✅ CORREGIDO: Usar userRepo en lugar de usersService para update directo
     const user = await this.userRepo.findOne({ where: { id: userId } });
 
     if (!user) {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    // Verificar si ya está verificado
     if (user.emailVerified) {
       throw new BadRequestException('El usuario ya está verificado');
     }
 
-    // Realizar la verificación manual
     await this.userRepo.update(userId, {
       emailVerified: true,
-      emailVerificationToken: null, // Limpiar el token
-      emailVerificationSentAt: new Date(), // Registrar cuando se verificó
-      activo: true // Asegurar que la cuenta esté activa
+      emailVerificationToken: null,
+      emailVerificationSentAt: new Date(),
+      activo: true
     });
 
     this.logger.log(`✅ Usuario ${user.correo} verificado manualmente por administrador`);
 
-    // Opcional: Enviar notificación al usuario
     try {
       await this.mailService.sendMail(
         user.correo,
@@ -231,7 +214,6 @@ export class AuthService {
       this.logger.log(`📧 Notificación enviada a ${user.correo}`);
     } catch (emailError) {
       this.logger.error(`❌ Error enviando notificación a ${user.correo}:`, emailError.message);
-      // No lanzar error, la verificación ya se completó
     }
 
     return {
@@ -244,6 +226,145 @@ export class AuthService {
         correo: user.correo,
         emailVerified: true
       }
+    };
+  }
+
+  // ================================================================
+  // ✅ PASO 1 — El estudiante solicita restablecer su contraseña
+  // Recibe el correo, genera un token seguro con expiración de 1 hora
+  // y envía el link al correo del usuario
+  // ================================================================
+  async requestPasswordReset(correo: string) {
+    const user = await this.usersService.findByCorreo(correo);
+
+    // ✅ Por seguridad: siempre responder igual aunque el correo no exista
+    // Esto evita que alguien pueda descubrir qué correos están registrados
+    if (!user) {
+      return {
+        success: true,
+        message: 'Si el correo está registrado, recibirás las instrucciones en breve.'
+      };
+    }
+
+    // Generar token seguro de 32 bytes
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora desde ahora
+
+    // Guardar token y expiración en el usuario
+    await this.userRepo.update(user.id, {
+      passwordResetToken: resetToken,
+      passwordResetExpiresAt: expiresAt,
+    });
+
+    // Construir link con el token
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+    // Enviar correo con el link
+    await this.mailService.sendMail(
+      user.correo,
+      '🔐 Restablecer contraseña - Cursos MAAT',
+      `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#2563eb;margin-bottom:20px">🔐 Restablecer tu contraseña</h2>
+  <p>Hola <strong>${user.nombres}</strong>,</p>
+  <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+  <p>Haz clic en el botón para crear una nueva contraseña:</p>
+  <div style="text-align:center;margin:30px 0">
+    <a href="${resetUrl}"
+       style="background:#2563eb;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;font-size:16px">
+      Restablecer contraseña
+    </a>
+  </div>
+  <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin:20px 0">
+    <p style="margin:0;color:#92400e;font-size:14px">
+      ⚠️ Este enlace expira en <strong>1 hora</strong>. Si no solicitaste este cambio, ignora este correo.
+    </p>
+  </div>
+  <p style="color:#6b7280;font-size:13px">Si el botón no funciona, copia este enlace: ${resetUrl}</p>
+  <hr style="margin:25px 0">
+  <p style="color:#9ca3af;font-size:12px">Cursos MAAT — Si no solicitaste esto, puedes ignorar este mensaje.</p>
+</div>
+      `.trim()
+    );
+
+    this.logger.log(`📧 Correo de recuperación enviado a ${user.correo}`);
+
+    return {
+      success: true,
+      message: 'Si el correo está registrado, recibirás las instrucciones en breve.'
+    };
+  }
+
+  // ================================================================
+  // ✅ PASO 2 — El estudiante ingresa su nueva contraseña
+  // Valida que el token sea válido y no haya expirado,
+  // luego actualiza la contraseña con hash bcrypt
+  // ================================================================
+  async resetPassword(token: string, newPassword: string) {
+    if (!token || !newPassword) {
+      throw new BadRequestException('Token y nueva contraseña son requeridos');
+    }
+
+    if (newPassword.length < 6) {
+      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres');
+    }
+
+    // Buscar usuario con ese token de reset
+    const user = await this.userRepo.findOne({
+      where: { passwordResetToken: token }
+    });
+
+    if (!user) {
+      throw new BadRequestException('Token inválido o ya utilizado');
+    }
+
+    // Verificar que el token no haya expirado
+    if (!user.passwordResetExpiresAt || new Date() > user.passwordResetExpiresAt) {
+      throw new BadRequestException('El enlace ha expirado. Por favor solicita uno nuevo.');
+    }
+
+    // Hashear la nueva contraseña
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Actualizar contraseña y limpiar tokens de reset
+    await this.userRepo.update(user.id, {
+      password: hashedPassword,
+      passwordResetToken: null,
+      passwordResetExpiresAt: null,
+    });
+
+    this.logger.log(`✅ Contraseña restablecida para ${user.correo}`);
+
+    // Notificar al usuario que su contraseña fue cambiada
+    try {
+      await this.mailService.sendMail(
+        user.correo,
+        '✅ Contraseña actualizada - Cursos MAAT',
+        `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#16a34a;margin-bottom:20px">✅ Contraseña actualizada</h2>
+  <p>Hola <strong>${user.nombres}</strong>,</p>
+  <p>Tu contraseña ha sido restablecida exitosamente.</p>
+  <p>Ya puedes iniciar sesión con tu nueva contraseña.</p>
+  <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;margin:20px 0">
+    <p style="margin:0;color:#166534;font-size:14px">
+      🔒 Si no realizaste este cambio, contacta a soporte inmediatamente.
+    </p>
+  </div>
+  <hr style="margin:25px 0">
+  <p style="color:#9ca3af;font-size:12px">Cursos MAAT</p>
+</div>
+        `.trim()
+      );
+    } catch (emailError) {
+      this.logger.error(`❌ Error enviando confirmación a ${user.correo}:`, emailError.message);
+      // No lanzar error, el reset ya se completó correctamente
+    }
+
+    return {
+      success: true,
+      message: 'Contraseña restablecida exitosamente. Ya puedes iniciar sesión.'
     };
   }
 }

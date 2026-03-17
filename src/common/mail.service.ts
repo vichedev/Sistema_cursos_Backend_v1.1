@@ -1,151 +1,110 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
-  private transporter: nodemailer.Transporter;
+  private readonly logger = new Logger(MailService.name);
 
   constructor(private config: ConfigService) {
-    this.initializeTransporter();
+    this.logger.log(`📧 SMTP: ${this.config.get('SMTP_HOST')}:587 | usuario: ${this.config.get('SMTP_USER')}`);
+    // Verificar conexión al arrancar sin bloquear el servidor
+    this.buildTransporter().verify()
+      .then(() => this.logger.log('✅ Conexión SMTP verificada correctamente'))
+      .catch((e) => this.logger.warn(`⚠️  SMTP no disponible al arrancar: ${e.message}`));
   }
 
-  private initializeTransporter() {
-    const config = {
-      host: this.config.get('SMTP_HOST'),
-      port: Number(this.config.get('SMTP_PORT')),
-      secure: this.config.get('SMTP_SECURE') === 'true',
+  // ================================================================
+  // ✅ Crea un transporter FRESCO por cada correo
+  //    Sin pool, con TLS permisivo — compatible con cPanel/Plesk
+  // ================================================================
+  private buildTransporter() {
+    return nodemailer.createTransport({
+      host: this.config.get<string>('SMTP_HOST'),
+      port: 587,
+      secure: false,
       auth: {
-        user: this.config.get('SMTP_USER'),
-        pass: this.config.get('SMTP_PASS'),
+        user: this.config.get<string>('SMTP_USER'),
+        pass: this.config.get<string>('SMTP_PASS'),
       },
-      // CONFIGURACIÓN MÍNIMA PARA DIAGNÓSTICO
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 10000,
-    };
-
-    console.log('🔧 Configuración SMTP:', {
-      host: config.host,
-      port: config.port,
-      secure: config.secure,
-      user: config.auth.user,
-      hasPassword: !!config.auth.pass
+      // ✅ CLAVE: permite certificados autofirmados (común en cPanel)
+      tls: {
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3',
+      },
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000,
+      // ❌ Sin pool — conexión nueva y limpia por cada envío
+      pool: false,
     });
-
-    this.transporter = nodemailer.createTransport(config);
-
-    // VERIFICAR CONEXIÓN CON MÁS DETALLES
-    this.verifyConnection();
   }
 
-  private async verifyConnection() {
-    try {
-      console.log('🔌 Intentando conectar con SMTP...');
-      await this.transporter.verify();
-      console.log('✅ Conexión SMTP exitosa');
-    } catch (error) {
-      console.error('❌ Error de conexión SMTP:', {
-        message: error.message,
-        code: error.code,
-        command: error.command
-      });
-      
-      // INTENTAR CON CONFIGURACIONES ALTERNATIVAS
-      await this.tryAlternativeConfigs();
-    }
-  }
+  // ================================================================
+  // ✅ ENVÍO CON RETRY — 3 intentos, 5s entre cada uno
+  // ================================================================
+  async sendMail(to: string, subject: string, html: string): Promise<void> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 5000;
 
-  private async tryAlternativeConfigs() {
-    const alternatives = [
-      { port: 465, secure: true, name: 'Puerto 465 (SSL)' },
-      { port: 25, secure: false, name: 'Puerto 25' },
-      { port: 587, secure: false, name: 'Puerto 587 (TLS)' },
-    ];
-
-    for (const alt of alternatives) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const transporter = this.buildTransporter();
       try {
-        console.log(`🔄 Probando ${alt.name}...`);
-        
-        const testTransporter = nodemailer.createTransport({
-          host: this.config.get('SMTP_HOST'),
-          port: alt.port,
-          secure: alt.secure,
-          auth: {
-            user: this.config.get('SMTP_USER'),
-            pass: this.config.get('SMTP_PASS'),
+        const t0 = Date.now();
+
+        await transporter.sendMail({
+          from: `"Cursos MAAT" <${this.config.get('SMTP_USER')}>`,
+          to,
+          subject,
+          html,
+          headers: {
+            'X-Priority': '1',
+            'X-MSMail-Priority': 'High',
+            'Importance': 'high',
           },
-          connectionTimeout: 5000,
-          greetingTimeout: 5000,
         });
 
-        await testTransporter.verify();
-        console.log(`✅ ${alt.name} FUNCIONA! Usa esta configuración:`);
-        console.log(`   SMTP_PORT=${alt.port}`);
-        console.log(`   SMTP_SECURE=${alt.secure}`);
-        return;
-        
+        this.logger.log(`✅ Correo enviado a ${to} en ${Date.now() - t0}ms (intento ${attempt})`);
+        transporter.close();
+        return; // ← éxito
+
       } catch (error) {
-        console.log(`❌ ${alt.name} falló: ${error.message}`);
-      }
-    }
-    
-    console.error('🚫 Todas las configuraciones alternativas fallaron');
-  }
+        transporter.close();
+        this.logger.warn(`⚠️  Intento ${attempt}/${MAX_RETRIES} fallido para ${to}: ${error.message}`);
 
-  async sendMail(to: string, subject: string, html: string) {
-    const startTime = Date.now();
-    
-    const mailOptions = {
-      from: `"Cursos MAAT" <${this.config.get('SMTP_USER')}>`,
-      to,
-      subject,
-      html,
-      // ✅ HEADERS PARA ENTREGA RÁPIDA
-      headers: {
-        'X-Priority': '1',
-        'X-MSMail-Priority': 'High',
-        'Importance': 'high',
-        'Precedence': 'bulk'
+        if (attempt < MAX_RETRIES) {
+          this.logger.log(`⏳ Reintentando en ${RETRY_DELAY / 1000}s...`);
+          await new Promise(r => setTimeout(r, RETRY_DELAY));
+        } else {
+          this.logger.error(`❌ No se pudo enviar a ${to} tras ${MAX_RETRIES} intentos`);
+          throw new Error(`Fallo al enviar correo a ${to}: ${error.message}`);
+        }
       }
-    };
-
-    try {
-      console.log(`📤 Enviando correo a: ${to}`);
-      
-      const result = await this.transporter.sendMail(mailOptions);
-      const duration = Date.now() - startTime;
-      
-      console.log(`✅ Correo enviado en ${duration}ms a: ${to}`);
-      return result;
-      
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      console.error(`❌ Error en ${duration}ms enviando a ${to}:`, error.message);
-      throw error;
     }
   }
 
-  // ✅ MÉTODO OPTIMIZADO - HTML MÁS SIMPLE Y RÁPIDO
+  // ================================================================
+  // ✅ CORREO DE VERIFICACIÓN DE CUENTA
+  // ================================================================
   async sendVerificationEmail(email: string, token: string, nombre: string) {
     const verificationUrl = `${this.config.get('FRONTEND_URL')}/verify-email?token=${token}`;
 
-    // ✅ HTML SUPER OPTIMIZADO - MENOS BYTES, MÁS RÁPIDO
     const html = `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
   <h2 style="color:#2563eb;margin-bottom:20px">Activa tu cuenta - Cursos MAAT</h2>
   <p>Hola <strong>${nombre}</strong>,</p>
   <p>Para activar tu cuenta, haz clic en el botón:</p>
   <div style="text-align:center;margin:25px 0">
-    <a href="${verificationUrl}" style="background:#2563eb;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold">Activar Cuenta</a>
+    <a href="${verificationUrl}"
+       style="background:#2563eb;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold">
+      Activar Cuenta
+    </a>
   </div>
-  <p style="color:#6b7280;font-size:14px">Si no funciona, copia: ${verificationUrl}</p>
+  <p style="color:#6b7280;font-size:14px">Si el botón no funciona, copia este enlace:<br>${verificationUrl}</p>
   <hr style="margin:25px 0">
   <p style="color:#9ca3af;font-size:12px">Cursos MAAT</p>
-</div>
-    `.trim(); // ✅ trim() elimina espacios innecesarios
+</div>`.trim();
 
     await this.sendMail(email, 'Activa tu cuenta - Cursos MAAT', html);
   }
-
 }

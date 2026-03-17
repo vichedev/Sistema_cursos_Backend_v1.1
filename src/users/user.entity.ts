@@ -68,4 +68,11 @@ export class User {
 
   @OneToMany(() => Course, (course) => course.profesor)
   cursosDictados: Course[];
+
+  @Column({ nullable: true, type: 'varchar', length: 64 })
+  passwordResetToken: string | null;
+
+  @Column({ nullable: true, type: 'timestamp' })
+  passwordResetExpiresAt: Date | null;
+
 }

@@ -8,7 +8,7 @@ import { RolesGuard } from './roles.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Post('register')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
@@ -22,7 +22,6 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  // Ruta GET para verificar correo electrónico (MANTENIENDO TU CÓDIGO)
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {
     if (!token) {
@@ -31,7 +30,6 @@ export class AuthController {
     return this.authService.verifyEmail(token);
   }
 
-  // Ruta POST para reenviar correo de verificación (MANTENIENDO TU CÓDIGO)
   @Post('resend-verification')
   async resendVerification(@Body('email') email: string) {
     if (!email) {
@@ -40,7 +38,6 @@ export class AuthController {
     return this.authService.resendVerificationEmail(email);
   }
 
-  // ✅ NUEVO: Endpoint para verificación manual por ADMIN
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Post('admin/verify-user/:userId')
@@ -51,11 +48,39 @@ export class AuthController {
     return this.authService.verifyUserManually(userId);
   }
 
-  // Ruta protegida solo para ADMIN (MANTENIENDO TU CÓDIGO)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('usuarios')
   findAll(@Request() req) {
     return 'Sólo para admins';
+  }
+
+  // ================================================================
+  // ✅ PASO 1 — Solicitar restablecimiento de contraseña
+  // El estudiante ingresa su correo y recibe un link por email
+  // Endpoint público (no requiere JWT)
+  // ================================================================
+  @Post('forgot-password')
+  async forgotPassword(@Body('correo') correo: string) {
+    if (!correo) {
+      throw new BadRequestException('El correo es requerido');
+    }
+    return this.authService.requestPasswordReset(correo);
+  }
+
+  // ================================================================
+  // ✅ PASO 2 — Establecer nueva contraseña con el token del email
+  // El token llega como query param desde el link del correo
+  // Endpoint público (no requiere JWT)
+  // ================================================================
+  @Post('reset-password')
+  async resetPassword(
+    @Body('token') token: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    if (!token || !newPassword) {
+      throw new BadRequestException('Token y nueva contraseña son requeridos');
+    }
+    return this.authService.resetPassword(token, newPassword);
   }
 }

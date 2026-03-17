@@ -202,8 +202,7 @@ export class CoursesController {
         imagen: course.imagen,
         tipo: course.tipo,
         cupos: course.cupos,
-        link: course.link, // ✅ INCLUIR LINK (aunque se filtra después según permisos)
-        recursosLink: course.recursosLink, // ✅ AGREGAR recursosLink
+        // ❌ link y recursosLink OMITIDOS — solo visibles tras inscripción/compra
         precio: course.precio,
         createdAt: course.createdAt,
         updatedAt: course.updatedAt,
