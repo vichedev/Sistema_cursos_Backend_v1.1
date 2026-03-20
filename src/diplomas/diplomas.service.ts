@@ -8,6 +8,8 @@ import { StudentCourse } from '../courses/student-course.entity';
 import { User } from '../users/user.entity';
 import { MailService } from '../common/mail.service';
 import puppeteer from 'puppeteer';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class DiplomasService {
@@ -39,6 +41,18 @@ export class DiplomasService {
     return this.config.get<string>('FRONTEND_URL') || 'http://localhost:5173';
   }
 
+  // ── Logo como base64 (evita peticiones HTTP dentro de Docker) ─────────────
+  private getLogoBase64(): string {
+    try {
+      const logoPath = path.join(process.cwd(), 'public', 'logo_render.png');
+      const logoData = fs.readFileSync(logoPath);
+      return `data:image/png;base64,${logoData.toString('base64')}`;
+    } catch {
+      this.logger.warn('⚠️  No se pudo leer logo_render.png desde /app/public — se omitirá en el PDF');
+      return '';
+    }
+  }
+
   // ── Generar PDF con Puppeteer ─────────────────────────────────────────────
   async generarPdf(codigo: string): Promise<Buffer> {
     // Buscar la inscripción por código
@@ -63,8 +77,8 @@ export class DiplomasService {
     // En Alpine/Docker usa el Chromium del sistema; en local usa el bundled de puppeteer
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
-    // Args seguros para todos los entornos (Windows/Mac/Linux/Docker)
-    const isDocker = !!process.env.PUPPETEER_EXECUTABLE_PATH;
+    // ✅ FIX: eliminado --single-process — causa "socket hang up" en Alpine Linux moderno.
+    // --no-zygote es suficiente y estable en contenedores Docker con node:20-alpine.
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -75,8 +89,7 @@ export class DiplomasService {
       '--disable-default-apps',
       '--disable-sync',
       '--no-first-run',
-      // --single-process y --no-zygote SOLO en Docker/Alpine, causan crashes en local
-      ...(isDocker ? ['--no-zygote', '--single-process'] : []),
+      '--no-zygote',
     ];
 
     const browser = await puppeteer.launch({
@@ -90,13 +103,12 @@ export class DiplomasService {
       const page = await browser.newPage();
       page.setDefaultTimeout(60000);
 
-      // ✅ CLAVE: bloquear todas las peticiones externas (Google Fonts, etc.)
+      // ✅ Bloquear todas las peticiones externas (Google Fonts, etc.)
       // En producción el contenedor Docker no siempre tiene salida a internet
       // y esperar esas peticiones causa el "socket hang up"
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         const url = req.url();
-        // Bloquear fuentes externas y cualquier recurso de red innecesario
         if (
           req.resourceType() === 'font' ||
           url.includes('fonts.googleapis.com') ||
@@ -109,12 +121,8 @@ export class DiplomasService {
       });
 
       // Reemplazar Google Fonts por fuentes seguras del sistema
-      // Georgia = fallback de Playfair Display, Arial = fallback de DM Sans
       const htmlSinFuentesExternas = html
-        .replace(
-          /<link[^>]*fonts\.googleapis\.com[^>]*>/g,
-          ''
-        )
+        .replace(/<link[^>]*fonts\.googleapis\.com[^>]*>/g, '')
         .replace(
           /font-family:'Playfair Display',Georgia,serif/g,
           "font-family:Georgia,'Times New Roman',serif"
@@ -130,7 +138,7 @@ export class DiplomasService {
 
       await page.setContent(htmlSinFuentesExternas, { waitUntil: 'domcontentloaded' });
 
-      // Pausa mínima — sin fuentes externas no necesitamos esperar
+      // Pausa mínima — sin fuentes externas no necesitamos esperar más
       await new Promise(resolve => setTimeout(resolve, 500));
 
       const pdf = await page.pdf({
@@ -249,10 +257,9 @@ export class DiplomasService {
   ): Promise<{ success: boolean; enviados: number; errores: number; detalle: any[] }> {
 
     // ── Configuración de lotes ─────────────────────────────────────────────
-    // Ajusta estos valores según los límites de tu servidor SMTP de cPanel:
-    const LOTE_TAMANO = 3;      // correos por lote
-    const PAUSA_MS = 8000;   // 8 segundos entre lotes
-    const PAUSA_ENTRE = 1500;   // 1.5s entre cada correo dentro del lote
+    const LOTE_TAMANO = 3;
+    const PAUSA_MS = 8000;
+    const PAUSA_ENTRE = 1500;
 
     const course = await this.courseRepo.findOne({
       where: { id: cursoId },
@@ -360,6 +367,7 @@ export class DiplomasService {
     const fechaCurso = course.fecha
       ? new Date(course.fecha).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
       : fechaEmision;
+    // En el correo sí usamos URL pública — los clientes de correo sí tienen acceso a internet
     const logoUrl = `${this.frontendUrl}/logo_render.png`;
 
     return `<!DOCTYPE html>
@@ -384,7 +392,6 @@ export class DiplomasService {
         <p style="margin:0 0 18px;font-size:13px;color:#64748b;font-family:'DM Sans',Arial,sans-serif;line-height:1.5;">
           Haz clic en el botón para descargar tu diploma en formato PDF directamente a tu dispositivo.
         </p>
-        <!-- BOTÓN DESCARGA DIRECTA PDF -->
         <a href="${urlPdf}"
            download="Diploma-MAAT-${student.nombres.replace(/\s+/g, '-')}.pdf"
            style="
@@ -509,16 +516,20 @@ export class DiplomasService {
     const fechaCurso = course.fecha
       ? new Date(course.fecha).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
       : fechaEmision;
-    const logoUrl = `${this.frontendUrl}/logo_render.png`;
+
+    // ✅ FIX: logo embebido como base64 — evita petición HTTP desde dentro de Docker
+    const logoSrc = this.getLogoBase64();
+    const logoTag = logoSrc
+      ? `<img src="${logoSrc}" alt="MAAT Academy" style="height:60px;border-radius:8px;background:#fff;padding:6px;margin-bottom:14px;"/>`
+      : '';
 
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-  html, body { width:100%; height:100%; background:#f0f4f8; font-family:'DM Sans',Arial,sans-serif; }
+  html, body { width:100%; height:100%; background:#f0f4f8; font-family:Arial,Helvetica,sans-serif; }
 
   .page {
     width: 277mm;
@@ -538,15 +549,14 @@ export class DiplomasService {
     padding: 28px 56px 24px;
     text-align: center;
   }
-  .header img { height: 60px; border-radius: 8px; background: #fff; padding: 6px; margin-bottom: 14px; }
   .header .institution { font-size: 10px; letter-spacing: 5px; color: #bfdbfe; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
-  .header h1 { font-size: 26px; color: #ffffff; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; line-height: 1.2; }
+  .header h1 { font-size: 26px; color: #ffffff; font-family: Georgia,'Times New Roman',serif; font-weight: 700; line-height: 1.2; }
   .header .line { width: 70px; height: 2px; background: linear-gradient(90deg, transparent, #93c5fd, transparent); margin: 12px auto 0; border-radius: 1px; }
 
   /* Cuerpo */
   .body { padding: 28px 56px 24px; text-align: center; flex: 1; }
   .label-small { font-size: 10px; color: #64748b; letter-spacing: 3px; text-transform: uppercase; font-weight: 600; margin-bottom: 7px; }
-  .student-name { font-size: 34px; color: #0f172a; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; line-height: 1.2; margin-bottom: 5px; }
+  .student-name { font-size: 34px; color: #0f172a; font-family: Georgia,'Times New Roman',serif; font-weight: 700; line-height: 1.2; margin-bottom: 5px; }
   .name-line { width: 180px; height: 2px; background: linear-gradient(90deg, transparent, #2563eb, transparent); margin: 0 auto 18px; border-radius: 1px; }
   .subtitle { font-size: 13px; color: #64748b; margin-bottom: 5px; }
 
@@ -558,7 +568,7 @@ export class DiplomasService {
     border-radius: 10px;
     padding: 13px 22px;
   }
-  .course-box h3 { font-size: 18px; color: #1d4ed8; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; line-height: 1.4; }
+  .course-box h3 { font-size: 18px; color: #1d4ed8; font-family: Georgia,'Times New Roman',serif; font-weight: 700; line-height: 1.4; }
 
   .dates { display: flex; gap: 12px; justify-content: center; margin-bottom: 22px; }
   .date-card { flex: 1; max-width: 190px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 9px; padding: 11px 14px; }
@@ -569,7 +579,7 @@ export class DiplomasService {
 
   .signature { text-align: center; }
   .sig-line { width: 160px; height: 1.5px; background: #cbd5e1; margin: 0 auto 7px; border-radius: 1px; }
-  .sig-name { font-size: 15px; color: #0f172a; font-family: 'Playfair Display', Georgia, serif; font-weight: 700; margin-bottom: 2px; }
+  .sig-name { font-size: 15px; color: #0f172a; font-family: Georgia,'Times New Roman',serif; font-weight: 700; margin-bottom: 2px; }
   .sig-subject { font-size: 11px; color: #64748b; margin-bottom: 3px; }
   .sig-role { font-size: 10px; color: #2563eb; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
 
@@ -587,7 +597,7 @@ export class DiplomasService {
 <div class="page">
 
   <div class="header">
-    <img src="${logoUrl}" alt="MAAT Academy" onerror="this.style.display='none'"/>
+    ${logoTag}
     <p class="institution">MAAT ACADEMY</p>
     <h1>Diploma de Asistencia</h1>
     <div class="line"></div>
