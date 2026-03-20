@@ -77,19 +77,25 @@ export class DiplomasService {
     // En Alpine/Docker usa el Chromium del sistema; en local usa el bundled de puppeteer
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
-    // ✅ FIX: eliminado --single-process — causa "socket hang up" en Alpine Linux moderno.
-    // --no-zygote es suficiente y estable en contenedores Docker con node:20-alpine.
+    // ✅ FIX: Chromium 146+ en Alpine/VPS sin GPU intenta inicializar Vulkan y falla
+    // con "VK_KHR_surface not supported" → "Exiting GPU process" → socket hang up.
+    // Solución: deshabilitar completamente GPU, Vulkan, y forzar renderizado software.
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--disable-gpu-sandbox',
+      '--disable-software-rasterizer',
+      '--disable-vulkan',
       '--disable-extensions',
       '--disable-background-networking',
       '--disable-default-apps',
       '--disable-sync',
       '--no-first-run',
       '--no-zygote',
+      '--use-gl=swiftshader',
+      '--ignore-gpu-blocklist',
     ];
 
     const browser = await puppeteer.launch({
