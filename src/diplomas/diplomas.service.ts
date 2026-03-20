@@ -74,33 +74,23 @@ export class DiplomasService {
 
     this.logger.log(`📄 Generando PDF para diploma: ${codigo}`);
 
-    // En Alpine/Docker usa el Chromium del sistema; en local usa el bundled de puppeteer
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-
-    // ✅ FIX: Chromium 146+ en Alpine/VPS sin GPU intenta inicializar Vulkan y falla
-    // con "VK_KHR_surface not supported" → "Exiting GPU process" → socket hang up.
-    // Solución: deshabilitar completamente GPU, Vulkan, y forzar renderizado software.
+    // ✅ Puppeteer 24 usa su propio Chromium descargado durante el build (node:20-slim/Debian).
+    // NO se usa executablePath ni PUPPETEER_EXECUTABLE_PATH.
+    // El Chromium de Alpine (musl libc) no es compatible con Puppeteer 24 → "socket hang up".
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--disable-gpu-sandbox',
-      '--disable-software-rasterizer',
-      '--disable-vulkan',
       '--disable-extensions',
       '--disable-background-networking',
       '--disable-default-apps',
       '--disable-sync',
       '--no-first-run',
-      '--no-zygote',
-      '--use-gl=swiftshader',
-      '--ignore-gpu-blocklist',
     ];
 
     const browser = await puppeteer.launch({
       headless: true,
-      executablePath,
       args,
       timeout: 60000,
     });
