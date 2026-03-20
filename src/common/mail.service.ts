@@ -107,4 +107,17 @@ export class MailService {
 
     await this.sendMail(email, 'Activa tu cuenta - Cursos MAAT', html);
   }
+
+
+  async sendDiploma(
+    email: string,
+    tituloCurso: string,
+    diplomaHtml: string,
+    nombre: string,
+  ): Promise<void> {
+    const subject = `🎓 Tu Diploma de Asistencia – ${tituloCurso} | MAAT Academy`;
+    // El diplomaHtml ya es el correo completo — se envía directamente
+    await this.sendMail(email, subject, diplomaHtml);
+  }
+
 }

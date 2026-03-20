@@ -14,11 +14,11 @@ import { PaymentsModule } from './payments/payments.module';
 import { StatsModule } from './stats/stats.module';
 import { CommonModule } from './common/common.module';
 import { NotificationsModule } from './notifications/notifications.module';
-// ✅ AGREGAR ENTIDADES DE CUPONES
 import { Coupon } from './coupons/coupon.entity';
 import { CouponUsage } from './coupons/coupon-usage.entity';
-// ✅ AGREGAR MÓDULO DE CUPONES
 import { CouponsModule } from './coupons/coupons.module';
+// ✅ NUEVO: módulo de diplomas
+import { DiplomasModule } from './diplomas/diplomas.module';
 
 @Module({
   imports: [
@@ -32,15 +32,7 @@ import { CouponsModule } from './coupons/coupons.module';
         username: config.get('DB_USER'),
         password: config.get('DB_PASS'),
         database: config.get('DB_NAME'),
-        entities: [
-          User,
-          Course,
-          StudentCourse,
-          PaymentAttempt,
-          // ✅ AGREGAR ENTIDADES DE CUPONES
-          Coupon,
-          CouponUsage,
-        ],
+        entities: [User, Course, StudentCourse, PaymentAttempt, Coupon, CouponUsage],
         synchronize: true,
       }),
       inject: [ConfigService],
@@ -52,8 +44,9 @@ import { CouponsModule } from './coupons/coupons.module';
     PaymentsModule,
     StatsModule,
     NotificationsModule,
-    // ✅ AGREGAR MÓDULO DE CUPONES
     CouponsModule,
+    // ✅ NUEVO
+    DiplomasModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }
