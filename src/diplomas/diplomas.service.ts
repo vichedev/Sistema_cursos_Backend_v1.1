@@ -83,39 +83,62 @@ export class DiplomasService {
       headless: true,
       executablePath,
       args,
-      // Tiempo generoso para arrancar el browser
-      timeout: 30000,
+      timeout: 60000,
     });
 
     try {
       const page = await browser.newPage();
+      page.setDefaultTimeout(60000);
 
-      // Timeout amplio para la carga del HTML
-      page.setDefaultTimeout(30000);
+      // ✅ CLAVE: bloquear todas las peticiones externas (Google Fonts, etc.)
+      // En producción el contenedor Docker no siempre tiene salida a internet
+      // y esperar esas peticiones causa el "socket hang up"
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const url = req.url();
+        // Bloquear fuentes externas y cualquier recurso de red innecesario
+        if (
+          req.resourceType() === 'font' ||
+          url.includes('fonts.googleapis.com') ||
+          url.includes('fonts.gstatic.com')
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
 
-      // Inyectar las fuentes como base64 en lugar de cargarlas desde Google
-      // para evitar problemas de red/timeout en desarrollo local
-      const htmlConFuentesInline = html.replace(
-        '<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>',
-        `<style>
-          /* Fallback seguro si Google Fonts no carga */
-          @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap');
-        </style>`
-      );
+      // Reemplazar Google Fonts por fuentes seguras del sistema
+      // Georgia = fallback de Playfair Display, Arial = fallback de DM Sans
+      const htmlSinFuentesExternas = html
+        .replace(
+          /<link[^>]*fonts\.googleapis\.com[^>]*>/g,
+          ''
+        )
+        .replace(
+          /font-family:'Playfair Display',Georgia,serif/g,
+          "font-family:Georgia,'Times New Roman',serif"
+        )
+        .replace(
+          /font-family:'DM Sans',Arial,sans-serif/g,
+          'font-family:Arial,Helvetica,sans-serif'
+        )
+        .replace(
+          /@import url\('https:\/\/fonts\.googleapis\.com[^']*'\);/g,
+          ''
+        );
 
-      // domcontentloaded es más rápido y estable que networkidle0
-      await page.setContent(htmlConFuentesInline, { waitUntil: 'domcontentloaded' });
+      await page.setContent(htmlSinFuentesExternas, { waitUntil: 'domcontentloaded' });
 
-      // Esperar un momento para que carguen las fuentes
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Pausa mínima — sin fuentes externas no necesitamos esperar
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const pdf = await page.pdf({
         format: 'A4',
         landscape: true,
         printBackground: true,
         margin: { top: '12mm', right: '14mm', bottom: '12mm', left: '14mm' },
-        // Timeout para la generación del PDF
-        timeout: 30000,
+        timeout: 60000,
       });
 
       this.logger.log(`✅ PDF generado (${pdf.length} bytes) para: ${codigo}`);
