@@ -521,13 +521,21 @@ ${frontendUrl}
       .where('course.id IN (:...cursosIds)', { cursosIds })
       .getMany();
 
-    return cursos.map((curso) => ({
-      ...curso,
-      profesorNombre: curso.profesor
-        ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
-        : null,
-      profesorAsignatura: curso.profesor ? curso.profesor.asignatura : null,
-    }));
+    // Mapear inscripción por cursoId para incluir datos del diploma
+    const inscripcionMap = new Map(inscritos.map((i) => [i.cursoId, i]));
+
+    return cursos.map((curso) => {
+      const inscripcion = inscripcionMap.get(curso.id);
+      return {
+        ...curso,
+        profesorNombre: curso.profesor
+          ? `${curso.profesor.nombres} ${curso.profesor.apellidos}`
+          : null,
+        profesorAsignatura: curso.profesor ? curso.profesor.asignatura : null,
+        diplomaCodigo: inscripcion?.diplomaCodigo ?? null,
+        diplomaEmitidoEn: inscripcion?.diplomaEmitidoEn ?? null,
+      };
+    });
   }
 
   // ===============================
