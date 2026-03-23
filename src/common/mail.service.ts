@@ -7,42 +7,31 @@ export class MailService {
   private readonly logger = new Logger(MailService.name);
 
   constructor(private config: ConfigService) {
-    this.logger.log(`📧 SMTP: ${this.config.get('SMTP_HOST')}:587 | usuario: ${this.config.get('SMTP_USER')}`);
-    // Verificar conexión al arrancar sin bloquear el servidor
+    this.logger.log(`📧 SMTP: ${this.config.get('SMTP_HOST')}:${this.config.get('SMTP_PORT')} | usuario: ${this.config.get('SMTP_USER')}`);
     this.buildTransporter().verify()
       .then(() => this.logger.log('✅ Conexión SMTP verificada correctamente'))
       .catch((e) => this.logger.warn(`⚠️  SMTP no disponible al arrancar: ${e.message}`));
   }
 
-  // ================================================================
-  // ✅ Crea un transporter FRESCO por cada correo
-  //    Sin pool, con TLS permisivo — compatible con cPanel/Plesk
-  // ================================================================
   private buildTransporter() {
     return nodemailer.createTransport({
       host: this.config.get<string>('SMTP_HOST'),
-      port: 587,
-      secure: false,
+      port: this.config.get<number>('SMTP_PORT'),           // ✅ Lee del .env
+      secure: this.config.get<string>('SMTP_SECURE') === 'true', // ✅ Lee del .env
       auth: {
         user: this.config.get<string>('SMTP_USER'),
         pass: this.config.get<string>('SMTP_PASS'),
       },
-      // ✅ CLAVE: permite certificados autofirmados (común en cPanel)
       tls: {
         rejectUnauthorized: false,
-        ciphers: 'SSLv3',
       },
       connectionTimeout: 30000,
       greetingTimeout: 30000,
       socketTimeout: 60000,
-      // ❌ Sin pool — conexión nueva y limpia por cada envío
       pool: false,
     });
   }
 
-  // ================================================================
-  // ✅ ENVÍO CON RETRY — 3 intentos, 5s entre cada uno
-  // ================================================================
   async sendMail(to: string, subject: string, html: string): Promise<void> {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 5000;
@@ -66,7 +55,7 @@ export class MailService {
 
         this.logger.log(`✅ Correo enviado a ${to} en ${Date.now() - t0}ms (intento ${attempt})`);
         transporter.close();
-        return; // ← éxito
+        return;
 
       } catch (error) {
         transporter.close();
@@ -83,9 +72,6 @@ export class MailService {
     }
   }
 
-  // ================================================================
-  // ✅ CORREO DE VERIFICACIÓN DE CUENTA
-  // ================================================================
   async sendVerificationEmail(email: string, token: string, nombre: string) {
     const verificationUrl = `${this.config.get('FRONTEND_URL')}/verify-email?token=${token}`;
 
@@ -108,7 +94,6 @@ export class MailService {
     await this.sendMail(email, 'Activa tu cuenta - Cursos MAAT', html);
   }
 
-
   async sendDiploma(
     email: string,
     tituloCurso: string,
@@ -116,8 +101,6 @@ export class MailService {
     nombre: string,
   ): Promise<void> {
     const subject = `🎓 Tu Diploma de Asistencia – ${tituloCurso} | MAAT Academy`;
-    // El diplomaHtml ya es el correo completo — se envía directamente
     await this.sendMail(email, subject, diplomaHtml);
   }
-
 }
