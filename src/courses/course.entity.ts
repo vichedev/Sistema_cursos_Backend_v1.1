@@ -33,7 +33,7 @@ export class Course {
   @Column({ nullable: true })
   recursosLink: string;
 
-  @Column({ default: 0 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   precio: number;
 
   @Column({ type: 'date', nullable: true })

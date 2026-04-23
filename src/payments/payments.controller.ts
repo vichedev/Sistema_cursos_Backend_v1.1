@@ -5,12 +5,14 @@ import {
   Body,
   UseGuards,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Get,
   Query,
   Res,
   Request,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -379,6 +381,8 @@ export class PaymentsController {
   // ===============================
   // ✅ ENDPOINT DE CALLBACK PÚBLICO (SIN AUTENTICACIÓN)
   // ===============================
+  // VULN-03: Rate limiting estricto en webhook — 20 req/min por IP
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Public()
   @Get('payphone-confirm')
   async payphoneConfirm(
@@ -888,6 +892,11 @@ export class PaymentsController {
   async debugPayment(
     @Query('clientTransactionId') clientTransactionId: string,
   ) {
+    // VULN-08: Endpoint de debug deshabilitado en producción
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Este endpoint no está disponible en producción');
+    }
+
     try {
       const paymentAttempt = await this.paymentAttemptRepo.findOne({
         where: { clientTransactionId },

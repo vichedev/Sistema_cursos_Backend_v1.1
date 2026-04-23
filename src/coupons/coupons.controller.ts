@@ -77,8 +77,10 @@ export class CouponsController {
   }
 
   // ===============================
-  // ✅ OBTENER CUPONES POR CURSO
+  // ✅ OBTENER CUPONES POR CURSO (solo ADMIN — expone códigos completos)
   // ===============================
+  // VULN-06: Restringido a ADMIN para evitar que estudiantes vean todos los códigos
+  @Roles('ADMIN')
   @Get('course/:cursoId')
   async getCouponsByCourse(@Param('cursoId') cursoId: number) {
     try {
@@ -89,8 +91,9 @@ export class CouponsController {
   }
 
   // ===============================
-  // ✅ OBTENER ESTADÍSTICAS DE CUPONES
+  // ✅ OBTENER ESTADÍSTICAS DE CUPONES (solo ADMIN)
   // ===============================
+  @Roles('ADMIN')
   @Get('stats/:cursoId')
   async getCouponStats(@Param('cursoId') cursoId: number) {
     try {

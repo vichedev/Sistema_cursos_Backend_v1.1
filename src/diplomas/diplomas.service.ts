@@ -7,6 +7,7 @@ import { Course } from '../courses/course.entity';
 import { StudentCourse } from '../courses/student-course.entity';
 import { User } from '../users/user.entity';
 import { MailService } from '../common/mail.service';
+import { NotificationsSseService } from '../notifications/notifications.sse.service';
 import puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,6 +25,7 @@ export class DiplomasService {
     private userRepo: Repository<User>,
     private mailService: MailService,
     private config: ConfigService,
+    private sse: NotificationsSseService,
   ) { }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -172,6 +174,7 @@ export class DiplomasService {
         ? { nombres: c.profesor.nombres, apellidos: c.profesor.apellidos, asignatura: c.profesor.asignatura }
         : null,
       totalEstudiantes: c.studentCourses?.length ?? 0,
+      diplomasEnviados: c.studentCourses?.filter((sc) => !!sc.diplomaCodigo).length ?? 0,
     }));
   }
 
@@ -244,6 +247,8 @@ export class DiplomasService {
     const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
     await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
+    this.sse.emitDiplomaGenerated(estudianteId, cursoId, course.titulo, codigo, student.nombres);
+
     return { success: true, message: `Diploma enviado a ${student.correo}`, codigo };
   }
 
@@ -307,6 +312,8 @@ export class DiplomasService {
 
           const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
           await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
+
+          this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo, codigo, student.nombres);
 
           enviados++;
           detalle.push({

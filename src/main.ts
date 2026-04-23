@@ -4,7 +4,11 @@ import { seedAdminUser } from './common/seed-admin';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
-
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import * as cookieParser from 'cookie-parser';
+import { WinstonModule, utilities as nestWinstonModuleUtilities } from 'nest-winston';
+import * as winston from 'winston';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -12,7 +16,46 @@ async function bootstrap() {
   try {
     logger.log('🚀 Iniciando servidor NestJS...');
 
-    const app = await NestFactory.create<NestExpressApplication>(AppModule);
+    // MEJ-01: Crear app con logger de Winston persistente
+    const winstonLogger = WinstonModule.createLogger({
+      transports: [
+        new winston.transports.Console({
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            nestWinstonModuleUtilities.format.nestLike('Backend', { prettyPrint: true }),
+          ),
+        }),
+        new winston.transports.File({
+          filename: 'logs/error.log',
+          level: 'error',
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json(),
+          ),
+        }),
+        new winston.transports.File({
+          filename: 'logs/combined.log',
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json(),
+          ),
+        }),
+      ],
+    });
+
+    // VULN-05: Validar fortaleza de JWT_SECRET antes de iniciar
+    const jwtSecret = process.env.JWT_SECRET;
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+    if (!jwtSecret || jwtSecret.length < 32) {
+      throw new Error('JWT_SECRET debe tener al menos 32 caracteres. Genera uno con: openssl rand -hex 32');
+    }
+    if (!jwtRefreshSecret || jwtRefreshSecret.length < 32) {
+      throw new Error('JWT_REFRESH_SECRET debe tener al menos 32 caracteres. Genera uno con: openssl rand -hex 32');
+    }
+
+    const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+      logger: winstonLogger,
+    });
 
     // ✅ CORS Configurado DINÁMICAMENTE desde variables de entorno
     const allowedOrigins: string[] = [];
@@ -62,6 +105,70 @@ async function bootstrap() {
     });
 
     logger.log(`🛡️  CORS configurado para: ${allowedOrigins.join(', ')}`);
+
+    // Necesario para leer cookies httpOnly (refreshToken)
+    app.use(cookieParser());
+    logger.log('🍪 Cookie parser activado');
+
+    // VULN-10: Helmet con CSP configurado
+    app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'"],
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }));
+    logger.log('🔒 Helmet con CSP activado');
+
+    // VULN-04: Rate limiting global — excluye SSE y rutas de lectura frecuente
+    app.use((req: any, res: any, next: any) => {
+      // SSE y rutas GET de alta frecuencia no necesitan rate limit global
+      const skipPaths = ['/api/notifications/stream', '/api/courses/all', '/api/courses/disponibles', '/api/courses/mis-cursos', '/api/stats/general'];
+      if (skipPaths.some(p => req.path.startsWith(p)) || (req.method === 'GET' && req.path.match(/^\/api\/courses\/\d+\/(estudiantes|estudiantes-con-pagos)$/))) {
+        return next();
+      }
+      return rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 500,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { message: 'Demasiadas solicitudes. Intenta nuevamente en 15 minutos.' },
+      })(req, res, next);
+    });
+
+    // Rate limiting estricto para endpoints de autenticación
+    const authLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 30,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Demasiados intentos de autenticación. Intenta nuevamente en 15 minutos.' },
+    });
+    const registerLimiter = rateLimit({
+      windowMs: 60 * 60 * 1000,
+      max: 20,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Demasiados registros desde esta IP. Intenta nuevamente en 1 hora.' },
+    });
+    const forgotPasswordLimiter = rateLimit({
+      windowMs: 60 * 60 * 1000,
+      max: 5,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Demasiadas solicitudes de recuperación. Intenta nuevamente en 1 hora.' },
+    });
+
+    app.use('/api/auth/login', authLimiter);
+    app.use('/api/auth/register', registerLimiter);
+    app.use('/api/auth/forgot-password', forgotPasswordLimiter);
+    app.use('/api/auth/resend-verification', forgotPasswordLimiter);
+    logger.log('🚦 Rate limiting configurado en endpoints de autenticación');
 
     // 🔒 VALIDATION PIPE - Global (PROTECCIÓN SQL INJECTION & XSS)
     app.useGlobalPipes(

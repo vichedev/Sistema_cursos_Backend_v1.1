@@ -5,7 +5,9 @@ import { Subject } from 'rxjs';
 export type SseEvent =
   | { type: 'COURSE_NOTIFY_START'; courseId: number; total: number; title: string }
   | { type: 'COURSE_NOTIFY_PROGRESS'; courseId: number; completed: number; total: number }
-  | { type: 'COURSE_NOTIFY_DONE'; courseId: number };
+  | { type: 'COURSE_NOTIFY_DONE'; courseId: number }
+  | { type: 'NEW_COURSE'; courseId: number; titulo: string; tipo: string; precio: number; imagen: string | null }
+  | { type: 'DIPLOMA_GENERATED'; estudianteId: number; courseId: number; titulo: string; codigo: string; nombres: string };
 
 @Injectable()
 export class NotificationsSseService {
@@ -64,6 +66,18 @@ export class NotificationsSseService {
         },
       } as MessageEvent,
     );
+  }
+
+  emitDiplomaGenerated(estudianteId: number, courseId: number, titulo: string, codigo: string, nombres: string) {
+    this.stream$.next({
+      data: { type: 'DIPLOMA_GENERATED', estudianteId: Number(estudianteId), courseId: Number(courseId), titulo, codigo, nombres },
+    } as MessageEvent);
+  }
+
+  emitNewCourse(courseId: number, titulo: string, tipo: string, precio: number, imagen: string | null = null) {
+    this.stream$.next({
+      data: { type: 'NEW_COURSE', courseId: Number(courseId), titulo, tipo, precio: parseFloat(String(precio)), imagen },
+    } as MessageEvent);
   }
 
   emitDone(courseId: number) {

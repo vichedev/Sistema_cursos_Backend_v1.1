@@ -2,6 +2,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -33,10 +35,13 @@ import { DiplomasModule } from './diplomas/diplomas.module';
         password: config.get('DB_PASS'),
         database: config.get('DB_NAME'),
         entities: [User, Course, StudentCourse, PaymentAttempt, Coupon, CouponUsage],
-        synchronize: true,
+        // VULN-01: synchronize solo en desarrollo — en producción usar migraciones
+        synchronize: config.get('NODE_ENV') !== 'production',
       }),
       inject: [ConfigService],
     }),
+    ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 600 }]),
     CommonModule,
     AuthModule,
     UsersModule,

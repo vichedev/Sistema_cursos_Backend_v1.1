@@ -13,7 +13,7 @@ import {
   ParseIntPipe,
   Query,
   BadRequestException,
-  Patch // ✅ IMPORT AGREGADO
+  Patch
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -21,6 +21,33 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AIService } from '../common/ai.service';
+import { SkipThrottle } from '@nestjs/throttler';
+
+// VULN-09: Validación por magic bytes — no confiar solo en extensión
+function validateImageMimeType(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 4) return false;
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true;
+  // WebP: 52 49 46 46 ... 57 45 42 50
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer.length >= 12 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) return true;
+  // GIF: 47 49 46 38
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return true;
+  return false;
+}
+
+const imageUploadOptions = {
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedMimes.includes(file.mimetype)) {
+      return cb(new BadRequestException('Solo se permiten imágenes JPEG, PNG, WebP o GIF'), false);
+    }
+    cb(null, true);
+  },
+};
 
 @Controller('courses')
 export class CoursesController {
@@ -68,53 +95,57 @@ export class CoursesController {
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('create')
-  @UseInterceptors(FileInterceptor('imagen'))
+  @UseInterceptors(FileInterceptor('imagen', imageUploadOptions))
   async create(
     @Body() body,
     @UploadedFile() file: Express.Multer.File,
     @Request() req,
   ) {
-    // Obtener ID del profesor (puede venir del body o del usuario autenticado)
+    // VULN-09: Validar magic bytes del archivo subido
+    if (file && !validateImageMimeType(file.buffer)) {
+      throw new BadRequestException('El archivo no es una imagen válida');
+    }
+
     let profesorId = body.profesorId || req.user.userId;
     let profesorNombre = '';
     let profesorAsignatura = '';
 
-    // Buscar información del profesor si se proporciona ID
     if (profesorId) {
       const user = await this.coursesService.findUserById(Number(profesorId));
       profesorNombre = user ? `${user.nombres} ${user.apellidos}` : '';
       profesorAsignatura = user?.asignatura || '';
     }
 
-    // Crear el curso con los datos proporcionados
     return this.coursesService.create({
       ...body,
-      imagen: file ? file.filename : null, // Guardar nombre del archivo si se subió imagen
+      imagen: file ? file.filename : null,
       profesorId,
       profesorNombre,
       profesorAsignatura,
+      precio: Math.round(parseFloat(body.precio || 0) * 100) / 100,
     });
   }
 
-  // ✅ ACTUALIZAR CURSO EXISTENTE
-  // Solo ADMIN puede actualizar cursos, requiere autenticación JWT y verificación de rol
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Put(':id')
-  @UseInterceptors(FileInterceptor('imagen'))
+  @UseInterceptors(FileInterceptor('imagen', imageUploadOptions))
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() body,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    // VULN-09: Validar magic bytes del archivo subido
+    if (file && !validateImageMimeType(file.buffer)) {
+      throw new BadRequestException('El archivo no es una imagen válida');
+    }
+
     const updateData: any = { ...body };
 
-    // Convertir campos numéricos a los tipos correctos
     if (body.profesorId) updateData.profesorId = Number(body.profesorId);
     if (body.cupos) updateData.cupos = Number(body.cupos);
     if (body.precio) updateData.precio = parseFloat(body.precio);
 
-    // Solo actualizar la imagen si se proporciona un nuevo archivo
     if (file) {
       updateData.imagen = file.filename;
     }
@@ -132,26 +163,24 @@ export class CoursesController {
   }
 
   // ✅ OBTENER CURSOS DISPONIBLES PARA INSCRIPCIÓN
-  // Solo usuarios autenticados pueden ver cursos disponibles
+  @SkipThrottle()
   @UseGuards(JwtAuthGuard)
   @Get('disponibles')
   async disponibles(@Request() req) {
     const userId = req.user.userId;
-    // Retorna cursos con información del estado de inscripción del usuario Y CUPONES
     return this.coursesService.cursosConEstadoInscrito(userId);
   }
 
-  // ✅ OBTENER TODOS LOS CURSOS (ENDPOINT PÚBLICO PERO CON DATOS FILTRADOS)
-  // Este endpoint es público pero filtra información sensible
+  // ✅ OBTENER TODOS LOS CURSOS (ENDPOINT PÚBLICO CON DATOS FILTRADOS)
+  @SkipThrottle()
   @Get('all')
   async all() {
     const courses = await this.coursesService.findAll();
-    // Filtrar datos sensibles antes de retornar
     return this.filterPublicCourseData(courses);
   }
 
   // ✅ OBTENER CURSOS DEL USUARIO AUTENTICADO
-  // Solo usuarios autenticados pueden ver sus cursos
+  @SkipThrottle()
   @UseGuards(JwtAuthGuard)
   @Get('mis-cursos')
   async misCursos(@Request() req) {
@@ -160,7 +189,7 @@ export class CoursesController {
   }
 
   // ✅ OBTENER ESTUDIANTES INSCRITOS EN UN CURSO
-  // Solo ADMIN puede ver la lista de estudiantes, requiere autenticación JWT y verificación de rol
+  @SkipThrottle()
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id/estudiantes')
@@ -169,7 +198,7 @@ export class CoursesController {
   }
 
   // ✅ OBTENER ESTUDIANTES CON INFORMACIÓN DE PAGOS
-  // Solo ADMIN puede ver información de pagos, requiere autenticación JWT y verificación de rol
+  @SkipThrottle()
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id/estudiantes-con-pagos')
@@ -234,26 +263,30 @@ export class CoursesController {
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('admin/inactivos')
-  async getCursosInactivos() {
-
+  async getCursosInactivos(
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query('search') search = '',
+  ) {
     try {
-      const courses = await this.coursesService.findInactiveCourses();
-      const filtered = this.filterPublicCourseData(courses);
-      return filtered;
+      const result = await this.coursesService.findInactiveCourses(+page, +limit, search);
+      return { ...result, data: this.filterPublicCourseData(result.data) };
     } catch (error) {
       throw error;
     }
   }
 
-  // ✅ OBTENER TODOS LOS CURSOS (ACTIVOS E INACTIVOS) PARA ADMIN
-  // Solo ADMIN puede ver todos los cursos sin filtrar
+  // MEJ-03: Paginación con búsqueda — ?page=1&limit=20&search=nombre
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('admin/todos')
-  async getAllCoursesForAdmin() {
-    const courses = await this.coursesService.findAllForAdmin();
-    // Filtrar datos sensibles antes de retornar
-    return this.filterPublicCourseData(courses);
+  async getAllCoursesForAdmin(
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query('search') search = '',
+  ) {
+    const result = await this.coursesService.findAllForAdmin(+page, +limit, search);
+    return { ...result, data: this.filterPublicCourseData(result.data) };
   }
 
   // ✅ ACTIVAR CURSO (RESTAURAR)

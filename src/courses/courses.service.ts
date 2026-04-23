@@ -142,7 +142,18 @@ export class CoursesService {
       );
     }
 
-    return this.findById(courseId);
+    const createdCourse = await this.findById(courseId);
+
+    // Notificar a estudiantes conectados sobre el nuevo curso via SSE
+    this.sse.emitNewCourse(
+      courseId,
+      data.titulo,
+      data.tipo,
+      parseFloat(String(data.precio || 0)),
+      data.imagen || null,
+    );
+
+    return createdCourse;
   }
 
   // ===============================
@@ -672,9 +683,10 @@ ${frontendUrl}
   // ===============================
   // ✅ FIND INACTIVE COURSES
   // ===============================
-  async findInactiveCourses() {
+  // MEJ-03: Paginación en cursos inactivos
+  async findInactiveCourses(page = 1, limit = 20, search = '') {
     try {
-      return await this.repo
+      const qb = this.repo
         .createQueryBuilder('course')
         .leftJoinAndSelect('course.profesor', 'profesor')
         .select([
@@ -685,19 +697,24 @@ ${frontendUrl}
           'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
         ])
         .where('course.activo = :activo', { activo: false })
-        .orderBy('course.updatedAt', 'DESC')
-        .getMany();
+        .orderBy('course.updatedAt', 'DESC');
+
+      if (search) {
+        qb.andWhere('LOWER(course.titulo) LIKE :search', { search: `%${search.toLowerCase()}%` });
+      }
+
+      const total = await qb.getCount();
+      const data = await qb.skip((page - 1) * limit).take(limit).getMany();
+      return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
     } catch (error) {
       console.error('❌ [SERVICE] Error en findInactiveCourses:', error);
       throw error;
     }
   }
 
-  // ===============================
-  // ✅ FIND ALL FOR ADMIN
-  // ===============================
-  async findAllForAdmin() {
-    return this.repo
+  // MEJ-03: Paginación en cursos admin (todos)
+  async findAllForAdmin(page = 1, limit = 20, search = '') {
+    const qb = this.repo
       .createQueryBuilder('course')
       .leftJoinAndSelect('course.profesor', 'profesor')
       .select([
@@ -708,8 +725,15 @@ ${frontendUrl}
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
       .orderBy('course.activo', 'DESC')
-      .addOrderBy('course.updatedAt', 'DESC')
-      .getMany();
+      .addOrderBy('course.updatedAt', 'DESC');
+
+    if (search) {
+      qb.where('LOWER(course.titulo) LIKE :search', { search: `%${search.toLowerCase()}%` });
+    }
+
+    const total = await qb.getCount();
+    const data = await qb.skip((page - 1) * limit).take(limit).getMany();
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   // ===============================

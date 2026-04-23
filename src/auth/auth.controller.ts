@@ -1,9 +1,10 @@
 // src/auth/auth.controller.ts
 import {
   Controller, Post, Body, UseGuards, Get,
-  Query, BadRequestException, Request,
-  UsePipes, ValidationPipe, Param,
+  Query, BadRequestException, Request, Req,
+  UsePipes, ValidationPipe, Param, Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -11,6 +12,15 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { Roles } from './roles.decorator';
 import { RolesGuard } from './roles.guard';
 import { Public } from './public.decorator';
+
+const REFRESH_TOKEN_COOKIE = 'refreshToken';
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+};
 
 @Controller('auth')
 export class AuthController {
@@ -24,19 +34,36 @@ export class AuthController {
 
   @Post('login')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const data = await this.authService.login(dto);
+    // VULN-02: Establecer refreshToken como cookie httpOnly para protegerlo de XSS
+    res.cookie(REFRESH_TOKEN_COOKIE, data.refreshToken, COOKIE_OPTIONS);
+    return data;
   }
 
-  // ✅ NUEVO — Renovar access token usando el refresh token
-  // Endpoint público, no requiere JWT (el access token ya expiró)
+  // Renovar access token usando el refresh token desde cookie httpOnly (o body como fallback)
   @Public()
   @Post('refresh')
-  async refresh(@Body('refreshToken') refreshToken: string) {
+  async refresh(
+    @Req() req: any,
+    @Body('refreshToken') refreshTokenBody: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE] || refreshTokenBody;
     if (!refreshToken) {
       throw new BadRequestException('refreshToken es requerido');
     }
-    return this.authService.refreshAccessToken(refreshToken);
+    const data = await this.authService.refreshAccessToken(refreshToken);
+    // Renovar también la cookie
+    res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, COOKIE_OPTIONS);
+    return data;
+  }
+
+  @Public()
+  @Post('logout')
+  async logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie(REFRESH_TOKEN_COOKIE, { path: '/' });
+    return { success: true, message: 'Sesión cerrada' };
   }
 
   @Get('verify-email')

@@ -7,11 +7,13 @@ import { Course } from '../courses/course.entity';
 import { StudentCourse } from '../courses/student-course.entity';
 import { User } from '../users/user.entity';
 import { CommonModule } from '../common/common.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([Course, StudentCourse, User]),
         CommonModule,
+        NotificationsModule,
     ],
     controllers: [DiplomasController],
     providers: [DiplomasService],

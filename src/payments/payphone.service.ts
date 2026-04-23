@@ -98,7 +98,8 @@ export class PayphoneService implements OnModuleInit {
       throw new Error('clientTransactionId es requerido');
     }
 
-    const totalAmountInCents = Math.round(amount * 100);
+    const numericAmount = parseFloat(String(amount));
+    const totalAmountInCents = Math.round(numericAmount * 100);
     const taxRate = 0.15;
     const amountWithTaxCents = Math.round(totalAmountInCents / (1 + taxRate));
     const taxCents = totalAmountInCents - amountWithTaxCents;
@@ -132,7 +133,7 @@ export class PayphoneService implements OnModuleInit {
     this.logger.log(`🚀 Iniciando pago en Payphone`);
     this.logger.log(`   API URL: ${this.payphoneApiUrl}/api/button/Prepare`);
     this.logger.log(`   Client Transaction ID: ${clientTransactionId}`);
-    this.logger.log(`   Amount: $${amount} (${totalAmountInCents} cents)`);
+    this.logger.log(`   Amount: $${numericAmount.toFixed(2)} (${totalAmountInCents} cents)`);
     this.logger.debug(`   Payload completo:`, JSON.stringify(paymentData, null, 2));
 
     // ✅ IMPLEMENTACIÓN DE REINTENTOS
