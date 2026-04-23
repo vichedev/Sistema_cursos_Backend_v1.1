@@ -231,46 +231,30 @@ is_system_configured() {
 
 # Función para gestión del .env
 setup_environment() {
+    # Verificar que el .env siempre esté presente (es obligatorio)
+    if [ ! -f "$ENV_FILE" ]; then
+        echo -e "${RED}❌ Error: Archivo $ENV_FILE no encontrado${NC}"
+        echo "El archivo .env es obligatorio en el servidor."
+        echo "Crea el archivo con todas las variables de entorno y vuelve a intentar."
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ $ENV_FILE encontrado${NC}"
+
     if ! is_system_configured; then
         echo -e "${YELLOW}🚀 CONFIGURACIÓN INICIAL DETECTADA${NC}"
-        
-        if [ ! -f "$ENV_FILE" ]; then
-            echo -e "${RED}❌ Error: Archivo $ENV_FILE no encontrado${NC}"
-            echo "Para la primera ejecución necesitas:"
-            echo "1. Crear un archivo $ENV_FILE con la configuración"
-            echo "2. Ejecutar el deploy nuevamente"
-            exit 1
-        fi
-        
-        echo -e "${GREEN}✅ $ENV_FILE encontrado - Configurando sistema...${NC}"
-        
         # Marcar sistema como configurado
         touch "$CONFIGURED_FILE"
-        
-        # Construir con la configuración inicial
         echo -e "${YELLOW}🐳 Construyendo servicios con configuración inicial...${NC}"
         docker compose build --build-arg USER_ID=1001 --build-arg GROUP_ID=1001 --no-cache backend
-        
     else
         echo -e "${GREEN}✅ Sistema ya configurado - Modo actualización${NC}"
-        
-        # En modo actualización, asegurarse de que no hay .env
-        if [ -f "$ENV_FILE" ]; then
-            echo -e "${YELLOW}⚠️  Eliminando $ENV_FILE temporal...${NC}"
-            rm "$ENV_FILE"
-        fi
     fi
 }
 
-# Función para limpiar .env al final
+# El .env NUNCA se elimina — es necesario en runtime para docker compose env_file
 cleanup_environment() {
-    if ! is_system_configured; then
-        if [ -f "$ENV_FILE" ]; then
-            echo -e "${YELLOW}🗑️  Eliminando $ENV_FILE por seguridad...${NC}"
-            rm "$ENV_FILE"
-            echo -e "${GREEN}✅ $ENV_FILE eliminado - Sistema seguro${NC}"
-        fi
-    fi
+    echo -e "${GREEN}✅ .env preservado en el servidor (requerido por docker compose)${NC}"
 }
 
 # ✅ FUNCIÓN MEJORADA: Liberar espacio SEGURO
