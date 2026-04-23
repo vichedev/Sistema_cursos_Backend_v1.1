@@ -354,26 +354,33 @@ update_from_git() {
     fi
     
     echo -e "${YELLOW}📦 Descargando actualizaciones desde Git...${NC}"
-    
-    if git pull origin main; then
+
+    # Descartar cambios locales y tomar exactamente lo que está en git
+    git fetch origin main
+    if git reset --hard origin/main; then
         echo -e "${GREEN}✅ Código actualizado desde Git${NC}"
         echo -e "${YELLOW}🔄 Reconstruyendo servicios...${NC}"
-        
-        # ✅ MÉTODO SEGURO: Construir sin detener
+
+        # Verificar que el .env sigue presente después del reset
+        if [ ! -f "$ENV_FILE" ]; then
+            echo -e "${RED}❌ CRÍTICO: El archivo .env no existe en el servidor${NC}"
+            echo -e "${YELLOW}💡 Crea el archivo .env con las variables de entorno y vuelve a intentar${NC}"
+            read -p "Presiona Enter para continuar..."
+            return 1
+        fi
+
         docker compose build --no-cache backend
-        
+
         echo -e "${YELLOW}🚀 Reiniciando servicios...${NC}"
-        # ✅ MÉTODO SEGURO: Recargar solo el backend
         docker compose up -d --no-deps backend
-        
-        # ✅ VERIFICAR QUE TODO FUNCIONE
+
         if verify_operation_success "actualización_git"; then
             echo -e "${GREEN}✅ Actualización completada exitosamente${NC}"
         else
             echo -e "${RED}⚠️  Actualización completada con advertencias${NC}"
             echo -e "${YELLOW}💡 Verificar el estado del sistema${NC}"
         fi
-        
+
     else
         echo -e "${RED}❌ Error al actualizar desde Git${NC}"
     fi
