@@ -2,6 +2,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Course } from '../courses/course.entity';
 import { CouponUsage } from './coupon-usage.entity';
+import { dateOnlyTransformer } from '../common/date.util';
 
 // ✅ DEFINIR Y EXPORTAR EL TIPO (ACTUALIZADO)
 export type CouponType = 'PORCENTAJE_10' | 'PORCENTAJE_15' | 'PORCENTAJE_30' | 'PORCENTAJE_50' | 'GRATIS';
@@ -34,8 +35,10 @@ export class Coupon {
   @Column({ default: 0 })
   usosActuales: number;
 
-  @Column({ type: 'date', nullable: true })
-  fechaExpiracion: Date | null;
+  // Se almacena y se expone SIEMPRE como cadena 'YYYY-MM-DD' (sin hora ni zona horaria)
+  // para evitar desplazamientos de día por la zona horaria del servidor.
+  @Column({ type: 'date', nullable: true, transformer: dateOnlyTransformer })
+  fechaExpiracion: string | null;
 
   @Column({ default: true })
   activo: boolean;

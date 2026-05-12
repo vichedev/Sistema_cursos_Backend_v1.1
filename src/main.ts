@@ -126,19 +126,21 @@ async function bootstrap() {
     logger.log('🔒 Helmet con CSP activado');
 
     // VULN-04: Rate limiting global — excluye SSE y rutas de lectura frecuente
+    // El limiter debe crearse UNA sola vez al iniciar, no dentro del request handler
+    const globalLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 500,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Demasiadas solicitudes. Intenta nuevamente en 15 minutos.' },
+    });
     app.use((req: any, res: any, next: any) => {
       // SSE y rutas GET de alta frecuencia no necesitan rate limit global
       const skipPaths = ['/api/notifications/stream', '/api/courses/all', '/api/courses/disponibles', '/api/courses/mis-cursos', '/api/stats/general'];
       if (skipPaths.some(p => req.path.startsWith(p)) || (req.method === 'GET' && req.path.match(/^\/api\/courses\/\d+\/(estudiantes|estudiantes-con-pagos)$/))) {
         return next();
       }
-      return rateLimit({
-        windowMs: 15 * 60 * 1000,
-        max: 500,
-        standardHeaders: true,
-        legacyHeaders: false,
-        message: { message: 'Demasiadas solicitudes. Intenta nuevamente en 15 minutos.' },
-      })(req, res, next);
+      return globalLimiter(req, res, next);
     });
 
     // Rate limiting estricto para endpoints de autenticación

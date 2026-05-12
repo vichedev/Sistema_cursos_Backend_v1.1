@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Coupon, CouponType } from './coupon.entity';
 import { CouponUsage } from './coupon-usage.entity';
 import { CreateCouponDto, UpdateCouponDto } from './dto/create-coupon.dto';
+import { isDateOnlyExpired, toDateOnlyString } from '../common/date.util';
 
 
 @Injectable()
@@ -43,9 +44,12 @@ export class CouponsService {
       activo: true
     };
 
-    // Solo agregar fechaExpiracion si existe
+    // Solo agregar fechaExpiracion si existe.
+    // ⚠️ Se guarda como cadena 'YYYY-MM-DD' — NO convertir a Date: hacerlo provoca que,
+    // por la zona horaria del servidor (ej. UTC-5), la fecha se almacene un día antes.
     if (createCouponDto.fechaExpiracion) {
-      couponData.fechaExpiracion = new Date(createCouponDto.fechaExpiracion);
+      const fecha = toDateOnlyString(createCouponDto.fechaExpiracion);
+      if (fecha) couponData.fechaExpiracion = fecha;
     }
 
     const coupon = this.couponRepo.create(couponData);
@@ -75,7 +79,14 @@ export class CouponsService {
       }
     }
 
-    await this.couponRepo.update(couponId, updateCouponDto);
+    // Normalizar la fecha de expiración a 'YYYY-MM-DD' (o null para limpiarla) antes de persistir.
+    // NO usar `new Date(...)`: desplazaría el día por la zona horaria del servidor.
+    const updateData: Record<string, any> = { ...updateCouponDto };
+    if ('fechaExpiracion' in updateData) {
+      updateData.fechaExpiracion = toDateOnlyString(updateData.fechaExpiracion);
+    }
+
+    await this.couponRepo.update(couponId, updateData);
 
     return await this.couponRepo.findOne({ where: { id: couponId } });
   }
@@ -110,7 +121,7 @@ export class CouponsService {
     }
 
     // Verificar fecha de expiración
-    if (coupon.fechaExpiracion && new Date() > coupon.fechaExpiracion) {
+    if (isDateOnlyExpired(coupon.fechaExpiracion)) {
       throw new BadRequestException('Este cupón ha expirado');
     }
 
@@ -172,7 +183,7 @@ export class CouponsService {
     const stats = {
       totalCupones: cupones.length,
       cuponesActivos: cupones.filter(c => c.activo).length,
-      cuponesExpirados: cupones.filter(c => c.fechaExpiracion && new Date() > c.fechaExpiracion).length,
+      cuponesExpirados: cupones.filter(c => isDateOnlyExpired(c.fechaExpiracion)).length,
       usosTotales: cupones.reduce((sum, c) => sum + c.usosActuales, 0),
       usosDisponibles: cupones.reduce((sum, c) => sum + (c.usosMaximos - c.usosActuales), 0),
       // ✅ ACTUALIZADO: Agregar nuevos tipos
@@ -273,7 +284,7 @@ export class CouponsService {
     }
 
     // Verificar fecha de expiración
-    if (coupon.fechaExpiracion && new Date() > coupon.fechaExpiracion) {
+    if (isDateOnlyExpired(coupon.fechaExpiracion)) {
       throw new BadRequestException('Este cupón ha expirado');
     }
 
@@ -461,7 +472,7 @@ export class CouponsService {
     }
 
     // Verificar fecha de expiración
-    if (coupon.fechaExpiracion && new Date() > coupon.fechaExpiracion) {
+    if (isDateOnlyExpired(coupon.fechaExpiracion)) {
       return { valid: false, error: 'Este cupón ha expirado' };
     }
 

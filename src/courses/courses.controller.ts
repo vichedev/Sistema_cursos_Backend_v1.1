@@ -22,6 +22,8 @@ import { Roles } from '../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AIService } from '../common/ai.service';
 import { SkipThrottle } from '@nestjs/throttler';
+import { isDateOnlyExpired } from '../common/date.util';
+import * as fs from 'fs';
 
 // VULN-09: Validación por magic bytes — no confiar solo en extensión
 function validateImageMimeType(buffer: Buffer): boolean {
@@ -36,6 +38,37 @@ function validateImageMimeType(buffer: Buffer): boolean {
   // GIF: 47 49 46 38
   if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return true;
   return false;
+}
+
+// VULN-09: Con diskStorage (multer) el archivo NO trae `buffer`, sino `path`.
+// Leemos los primeros bytes del disco para validar los magic bytes.
+function ensureValidImage(file: Express.Multer.File): void {
+  if (!file) return;
+
+  let header: Buffer | undefined = file.buffer;
+
+  if ((!header || header.length < 12) && file.path) {
+    try {
+      const fd = fs.openSync(file.path, 'r');
+      try {
+        const tmp = Buffer.alloc(12);
+        const bytesRead = fs.readSync(fd, tmp, 0, 12, 0);
+        header = tmp.subarray(0, bytesRead);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      header = undefined;
+    }
+  }
+
+  if (!validateImageMimeType(header as Buffer)) {
+    // Limpiar el archivo inválido que multer ya escribió en disco
+    if (file.path) {
+      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+    }
+    throw new BadRequestException('El archivo no es una imagen válida');
+  }
 }
 
 const imageUploadOptions = {
@@ -102,9 +135,7 @@ export class CoursesController {
     @Request() req,
   ) {
     // VULN-09: Validar magic bytes del archivo subido
-    if (file && !validateImageMimeType(file.buffer)) {
-      throw new BadRequestException('El archivo no es una imagen válida');
-    }
+    ensureValidImage(file);
 
     let profesorId = body.profesorId || req.user.userId;
     let profesorNombre = '';
@@ -136,9 +167,7 @@ export class CoursesController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     // VULN-09: Validar magic bytes del archivo subido
-    if (file && !validateImageMimeType(file.buffer)) {
-      throw new BadRequestException('El archivo no es una imagen válida');
-    }
+    ensureValidImage(file);
 
     const updateData: any = { ...body };
 
@@ -220,7 +249,7 @@ export class CoursesController {
       const cuponesActivos = course.cupones?.filter(cupon =>
         cupon.activo &&
         cupon.usosActuales < cupon.usosMaximos &&
-        (!cupon.fechaExpiracion || new Date() < cupon.fechaExpiracion)
+        !isDateOnlyExpired(cupon.fechaExpiracion)
       ) || [];
 
       // Crear objeto filtrado con solo información segura para mostrar públicamente

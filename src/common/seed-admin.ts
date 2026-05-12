@@ -16,6 +16,7 @@ export async function seedAdminUser(app: INestApplication) {
   const correo = config.get<string>('ADMIN_EMAIL');
   const cedula = config.get<string>('ADMIN_CEDULA');
   const celular = config.get<string>('ADMIN_CELULAR');
+  const pais = config.get<string>('ADMIN_PAIS') || 'EC';
   const asignatura = config.get<string>('ADMIN_ASIGNATURA') || 'Redes y Telecomunicaciones';
 
   if (!adminPassword || !usuario || !nombres || !apellidos || !correo || !cedula || !celular) {
@@ -34,10 +35,11 @@ export async function seedAdminUser(app: INestApplication) {
       usuario,
       cedula,
       celular,
+      pais,
       password: hash,
       rol: 'ADMIN',
       asignatura,
-      emailVerified: true, 
+      emailVerified: true,
     });
     console.log('Usuario administrador creado y verificado');
   } else if (!existe.emailVerified) {

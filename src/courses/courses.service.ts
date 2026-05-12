@@ -12,6 +12,7 @@ import axios from 'axios';
 
 import { NotificationsSseService } from '../notifications/notifications.sse.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { isDateOnlyExpired } from '../common/date.util';
 
 @Injectable()
 export class CoursesService {
@@ -629,8 +630,7 @@ ${frontendUrl}
         cursoConCupones?.cupones?.some((cupon) => {
           const activo = cupon.activo !== false;
           const usosDisponibles = cupon.usosActuales < cupon.usosMaximos;
-          const noExpirado =
-            !cupon.fechaExpiracion || new Date() < new Date(cupon.fechaExpiracion);
+          const noExpirado = !isDateOnlyExpired(cupon.fechaExpiracion);
           return activo && usosDisponibles && noExpirado;
         }) || false;
 
