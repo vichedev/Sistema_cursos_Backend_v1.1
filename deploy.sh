@@ -224,6 +224,22 @@ verify_operation_success() {
     fi
 }
 
+# ✅ FUNCIÓN NUEVA: Aplicar esquema de tablas nuevas (idempotente y seguro)
+# Crea las tablas de Configuración, Campañas y Destinatarios si no existen.
+# No altera ni borra nada existente (usa CREATE TABLE IF NOT EXISTS).
+apply_new_tables() {
+    local sql_file="init-prod-tablas-nuevas.sql"
+    if [ ! -f "$sql_file" ]; then
+        return 0
+    fi
+    echo -e "${YELLOW}🗄️  Aplicando esquema de tablas nuevas (idempotente)...${NC}"
+    if docker exec -i cursos_postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$sql_file" >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ Esquema de tablas verificado/creado${NC}"
+    else
+        echo -e "${YELLOW}⚠️  No se pudo aplicar el esquema (revisa que PostgreSQL esté listo)${NC}"
+    fi
+}
+
 # Función para verificar si el sistema está configurado
 is_system_configured() {
     [ -f "$CONFIGURED_FILE" ]
@@ -371,8 +387,16 @@ update_from_git() {
 
         docker compose build --no-cache backend
 
+        # Asegurar carpeta de sesión de WhatsApp con permisos del usuario del contenedor (1001)
+        mkdir -p whatsapp-session
+        sudo chown -R 1001:1001 whatsapp-session/ 2>/dev/null || true
+
         echo -e "${YELLOW}🚀 Reiniciando servicios...${NC}"
         docker compose up -d --no-deps backend
+
+        # ✅ Crear/verificar tablas nuevas (idempotente)
+        sleep 8
+        apply_new_tables
 
         if verify_operation_success "actualización_git"; then
             echo -e "${GREEN}✅ Actualización completada exitosamente${NC}"
@@ -424,7 +448,10 @@ install_or_update_system() {
     
     echo -e "${YELLOW}⏳ Esperando que los servicios estén listos...${NC}"
     sleep 15
-    
+
+    # ✅ Crear/verificar tablas nuevas (Configuración, Campañas) — idempotente
+    apply_new_tables
+
     # Verificar permisos
     echo -e "${YELLOW}🔧 Verificando y corrigiendo permisos...${NC}"
     fix_permissions
@@ -550,9 +577,9 @@ fix_permissions() {
     
     # 1. Permisos en HOST
     echo -e "${YELLOW}📁 Paso 1/3: Configurando permisos en HOST...${NC}"
-    mkdir -p uploads public
-    sudo chown -R 1001:1001 uploads/ 2>/dev/null || true
-    sudo chmod -R 755 uploads/ 2>/dev/null || true
+    mkdir -p uploads public whatsapp-session
+    sudo chown -R 1001:1001 uploads/ whatsapp-session/ 2>/dev/null || true
+    sudo chmod -R 755 uploads/ whatsapp-session/ 2>/dev/null || true
     echo -e "${GREEN}✅ Permisos en HOST configurados${NC}"
     sleep 1
     

@@ -25,6 +25,7 @@ services:
     volumes:
       - ./uploads:/app/uploads:rw
       - ./public:/app/public:ro
+      - ./whatsapp-session:/app/whatsapp-session:rw
     depends_on:
       - postgres
     networks:
