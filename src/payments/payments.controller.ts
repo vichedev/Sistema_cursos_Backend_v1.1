@@ -24,13 +24,13 @@ import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { CouponsService } from '../coupons/coupons.service';
 import { SettingsService } from '../settings/settings.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StudentCourse } from '../courses/student-course.entity';
 import { PaymentAttempt } from './payment-attempt.entity';
 import { CouponUsage } from '../coupons/coupon-usage.entity';
 import { Public } from '../auth/public.decorator';
-import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 
 @Controller('payments')
@@ -49,6 +49,7 @@ export class PaymentsController {
     private configService: ConfigService,
     private couponsService: CouponsService,
     private settingsService: SettingsService,
+    private whatsappService: WhatsappService,
     @InjectRepository(StudentCourse)
     private studentCourseRepo: Repository<StudentCourse>,
     @InjectRepository(PaymentAttempt)
@@ -59,6 +60,7 @@ export class PaymentsController {
     this.notificationService = new PaymentNotificationService(
       mailService,
       settingsService,
+      whatsappService,
     );
   }
 
@@ -1098,6 +1100,7 @@ class PaymentNotificationService {
   constructor(
     private mailService: MailService,
     private settings: SettingsService,
+    private whatsapp: WhatsappService,
   ) {}
 
   // Datos de contacto/notificación leídos en CALIENTE desde el panel admin
@@ -1356,33 +1359,19 @@ ${recursosTexto}
     }
   }
 
+  // ✅ WhatsApp vía conexión Baileys (la del QR en Configuración) — ya NO usa WBOT/.env
   private async sendWhatsApp(celular: string, mensaje: string) {
     if (!celular) return;
 
-    const token = process.env.WHATSAPP_API_TOKEN;
-    if (!token) {
-      console.error('No se pudo enviar WhatsApp: token no configurado');
+    if (!this.whatsapp.getStatus().connected) {
+      console.warn('⚠️ WhatsApp no conectado (escanea el QR en Configuración). Mensaje omitido.');
       return;
     }
 
-    const numeroFormateado = celular.replace(/[^0-9]/g, '');
-    const url = 'https://app.wbot.ec:443/backend/api/messages/send';
-    const data = {
-      number: numeroFormateado,
-      body: mensaje,
-      saveOnTicket: true,
-      linkPreview: true,
-    };
-
     try {
-      await axios.post(url, data, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      await this.whatsapp.sendText(celular, mensaje);
     } catch (error) {
-      console.error(`Error enviando WhatsApp a ${numeroFormateado}:`, error);
+      console.error(`Error enviando WhatsApp a ${celular}:`, error.message);
     }
   }
 }

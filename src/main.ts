@@ -238,7 +238,7 @@ async function bootstrap() {
     logger.log(`🔐 JWT: Configurado con clave segura`);
     logger.log(`📧 SMTP: ${process.env.SMTP_HOST ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
     logger.log(`💳 Payphone: ${process.env.PAYPHONE_API_URL ? 'INTEGRADO' : 'NO CONFIGURADO'}`);
-    logger.log(`📱 WhatsApp: ${process.env.WHATSAPP_API_TOKEN ? 'CONFIGURADO' : 'NO CONFIGURADO'}`);
+    logger.log(`📱 WhatsApp: conexión nativa (Baileys) — vincula por QR en Configuración`);
     logger.log(`🤖 DeepSeek IA: ${process.env.DEEPSEEK_API_KEY ? 'CONFIGURADA ✅' : 'NO CONFIGURADA'}`);
     logger.log(`🌍 CORS: ${allowedOrigins.length} dominios permitidos`);
     logger.log('='.repeat(60));

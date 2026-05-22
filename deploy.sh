@@ -39,7 +39,7 @@ check_database_health() {
     fi
     
     # Verificar que la base de datos existe y es accesible
-    if docker exec cursos_postgres psql -U postgres -d sistema_cursos -c "SELECT 1;" &>/dev/null; then
+    if docker exec cursos_postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1;"' &>/dev/null; then
         echo -e "${GREEN}✅ Base de datos 'sistema_cursos' accesible${NC}"
         return 0
     else
@@ -57,7 +57,7 @@ create_automatic_backup() {
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     local backup_file="$BACKUP_DIR/auto_backup_${context}_${timestamp}.sql"
     
-    if docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$backup_file" 2>/dev/null; then
+    if docker exec cursos_postgres sh -c 'pg_dump --clean --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$backup_file" 2>/dev/null; then
         gzip "$backup_file"
         echo -e "${GREEN}✅ Backup automático creado: ${backup_file}.gz${NC}"
         return 0
@@ -76,7 +76,7 @@ create_emergency_backup() {
     mkdir -p "$BACKUP_DIR"
     local backup_file="$BACKUP_DIR/EMERGENCY_${operation}_$(date +"%Y%m%d_%H%M%S").sql"
     
-    if ! docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$backup_file" 2>/dev/null; then
+    if ! docker exec cursos_postgres sh -c 'pg_dump --clean --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$backup_file" 2>/dev/null; then
         echo -e "${RED}❌ CRÍTICO: No se pudo crear respaldo de emergencia${NC}"
         echo -e "${RED}🚨 NO CONTINÚES LA OPERACIÓN${NC}"
         return 1
@@ -137,7 +137,7 @@ restore_database() {
     # ✅ CREAR BACKUP DE LA BD ACTUAL (por si acaso)
     echo -e "${YELLOW}💾 Creando backup de la base de datos actual...${NC}"
     local current_backup="$BACKUP_DIR/pre_restore_$(date +"%Y%m%d_%H%M%S").sql"
-    docker exec cursos_postgres pg_dump -U postgres sistema_cursos > "$current_backup" 2>/dev/null && gzip "$current_backup"
+    docker exec cursos_postgres sh -c 'pg_dump --clean --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$current_backup" 2>/dev/null && gzip "$current_backup"
     echo -e "${GREEN}✅ Backup de seguridad creado${NC}"
     
     # Detener servicios que usan la BD
@@ -146,7 +146,7 @@ restore_database() {
     
     # Restaurar backup
     echo -e "${YELLOW}🔄 Restaurando base de datos...${NC}"
-    if gunzip -c "$selected_backup" | docker exec -i cursos_postgres psql -U postgres sistema_cursos; then
+    if gunzip -c "$selected_backup" | docker exec -i cursos_postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; then
         echo -e "${GREEN}✅ Base de datos restaurada exitosamente${NC}"
     else
         echo -e "${RED}❌ Error al restaurar la base de datos${NC}"

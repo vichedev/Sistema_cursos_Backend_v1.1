@@ -57,3 +57,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Sesión de WhatsApp (Baileys) — contiene credenciales, NO versionar
 whatsapp-session/
+
+# Respaldos de base de datos — datos sensibles, NO versionar
+backups/
+
+# Archivos de estado del deploy.sh (locales al servidor)
+.system-configured
+.deploy-lock

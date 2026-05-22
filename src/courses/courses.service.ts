@@ -8,11 +8,11 @@ import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../common/mail.service';
 import { User } from '../users/user.entity';
-import axios from 'axios';
 
 import { NotificationsSseService } from '../notifications/notifications.sse.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { isDateOnlyExpired } from '../common/date.util';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class CoursesService {
@@ -29,6 +29,7 @@ export class CoursesService {
     private mail: MailService,
     private readonly sse: NotificationsSseService,
     private readonly couponsService: CouponsService,
+    private readonly whatsapp: WhatsappService,
   ) { }
 
   // ===============================
@@ -332,7 +333,7 @@ ${frontendUrl}
   }
 
   // ===============================
-  // ✅ ENVIAR WHATSAPP
+  // ✅ ENVIAR WHATSAPP — vía conexión Baileys (la del QR en Configuración)
   // ===============================
   private async enviarWhatsapp(celular: string, mensaje: string) {
     if (!celular) {
@@ -340,36 +341,16 @@ ${frontendUrl}
       return;
     }
 
-    const token = process.env.WHATSAPP_API_TOKEN;
-    if (!token) {
-      this.logger.error('❌ No se pudo enviar WhatsApp: token no configurado en .env');
+    if (!this.whatsapp.getStatus().connected) {
+      this.logger.warn('⚠️ WhatsApp no está conectado (escanea el QR en Configuración). Mensaje omitido.');
       return;
     }
 
-    const numeroFormateado = celular.replace(/[^0-9]/g, '');
-
     try {
-      await axios.post(
-        'https://app.wbot.ec:443/backend/api/messages/send',
-        {
-          number: numeroFormateado,
-          body: mensaje,
-          saveOnTicket: true,
-          linkPreview: true,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
-        },
-      );
-      this.logger.log(`📱 Mensaje WhatsApp enviado a ${numeroFormateado}`);
+      await this.whatsapp.sendText(celular, mensaje);
+      this.logger.log(`📱 Mensaje WhatsApp enviado a ${celular}`);
     } catch (error) {
-      this.logger.error(
-        `❌ Error enviando WhatsApp a ${numeroFormateado}: ${JSON.stringify(error.response?.data) || error.message}`,
-      );
+      this.logger.error(`❌ Error enviando WhatsApp a ${celular}: ${error.message}`);
     }
   }
 
