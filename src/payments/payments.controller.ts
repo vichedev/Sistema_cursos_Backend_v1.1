@@ -23,6 +23,7 @@ import { CoursesService } from '../courses/courses.service';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { CouponsService } from '../coupons/coupons.service';
+import { SettingsService } from '../settings/settings.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StudentCourse } from '../courses/student-course.entity';
@@ -47,6 +48,7 @@ export class PaymentsController {
     private usersService: UsersService,
     private configService: ConfigService,
     private couponsService: CouponsService,
+    private settingsService: SettingsService,
     @InjectRepository(StudentCourse)
     private studentCourseRepo: Repository<StudentCourse>,
     @InjectRepository(PaymentAttempt)
@@ -56,7 +58,7 @@ export class PaymentsController {
   ) {
     this.notificationService = new PaymentNotificationService(
       mailService,
-      configService,
+      settingsService,
     );
   }
 
@@ -1093,31 +1095,28 @@ export class PaymentsController {
 // ✅ SERVICIO DE NOTIFICACIONES (Separado para reutilización)
 // ===============================
 class PaymentNotificationService {
-  private readonly notificacionesInscripciones: string;
-  private readonly alertasSistema: string;
-  private readonly correoSoporte: string;
-  private readonly telefonoSoporte: string;
-  private readonly correosAdminExtra: string[];
-
   constructor(
     private mailService: MailService,
-    private configService: ConfigService,
-  ) {
-    this.notificacionesInscripciones =
-      this.configService.get<string>('NOTIFICACIONES_INSCRIPCIONES') ||
-      'cursos@rednuevaconexion.net';
-    this.alertasSistema =
-      this.configService.get<string>('ALERTAS_SISTEMA') ||
-      'cursos@rednuevaconexion.net';
-    this.correoSoporte =
-      this.configService.get<string>('CORREO_SOPORTE') || 'vzamora@maat.ec';
-    this.telefonoSoporte =
-      this.configService.get<string>('TELEFONO_SOPORTE') || '0986819378';
+    private settings: SettingsService,
+  ) {}
 
-    const correosExtra = this.configService.get<string>('CORREOS_ADMIN_EXTRA');
-    this.correosAdminExtra = correosExtra
-      ? correosExtra.split(',').map((email) => email.trim())
-      : [];
+  // Datos de contacto/notificación leídos en CALIENTE desde el panel admin
+  // (con fallback al .env vía SettingsService).
+  private get notificacionesInscripciones(): string {
+    return this.settings.get('notif_inscripciones') || 'cursos@rednuevaconexion.net';
+  }
+  private get alertasSistema(): string {
+    return this.settings.get('notif_alertas') || 'cursos@rednuevaconexion.net';
+  }
+  private get correoSoporte(): string {
+    return this.settings.get('soporte_correo') || 'vzamora@maat.ec';
+  }
+  private get telefonoSoporte(): string {
+    return this.settings.get('soporte_telefono') || '0986819378';
+  }
+  private get correosAdminExtra(): string[] {
+    const extra = this.settings.get('correos_admin_extra');
+    return extra ? extra.split(',').map((e) => e.trim()).filter(Boolean) : [];
   }
 
   async sendEnrollmentNotifications(

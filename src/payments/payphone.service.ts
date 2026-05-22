@@ -6,56 +6,62 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PaymentAttempt } from './payment-attempt.entity';
 import { firstValueFrom } from 'rxjs';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class PayphoneService implements OnModuleInit {
   private readonly logger = new Logger(PayphoneService.name);
-  private payphoneApiUrl: string;
-  private payphoneStoreId: string;
-  private payphoneToken: string;
-  private frontendUrl: string;
-  private backendUrl: string;
-  private timeout: number;
 
   constructor(
     private configService: ConfigService,
     private httpService: HttpService,
+    private settings: SettingsService,
     @InjectRepository(PaymentAttempt)
     private paymentAttemptRepo: Repository<PaymentAttempt>,
   ) {}
 
-  onModuleInit() {
-    this.payphoneApiUrl = this.configService.get<string>('PAYPHONE_API_URL') || '';
-    this.payphoneStoreId = this.configService.get<string>('PAYPHONE_STORE_ID') || '';
-    this.payphoneToken = this.configService.get<string>('PAYPHONE_TOKEN') || '';
-    this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
-    this.backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3001';
-    this.timeout = this.configService.get<number>('PAYPHONE_TIMEOUT') || 15000; // ✅ Aumentado a 15 segundos
+  // ── Config leída en CALIENTE desde el panel (con fallback al .env) ──
+  private get payphoneApiUrl() {
+    return this.settings.getPayphoneConfig().apiUrl;
+  }
+  private get payphoneStoreId() {
+    return this.settings.getPayphoneConfig().storeId;
+  }
+  private get payphoneToken() {
+    return this.settings.getPayphoneConfig().token;
+  }
+  private get timeout() {
+    return this.settings.getPayphoneConfig().timeout;
+  }
+  private get frontendUrl() {
+    return this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+  }
+  private get backendUrl() {
+    return this.configService.get<string>('BACKEND_URL') || 'http://localhost:3001';
+  }
 
+  onModuleInit() {
     this.validateConfig();
   }
 
   private validateConfig(): void {
+    // No lanza: si falta algo, solo advierte (el admin lo configura en el panel).
     const requiredConfigs = {
-      PAYPHONE_API_URL: this.payphoneApiUrl,
-      PAYPHONE_STORE_ID: this.payphoneStoreId,
-      PAYPHONE_TOKEN: this.payphoneToken,
-      FRONTEND_URL: this.frontendUrl,
-      BACKEND_URL: this.backendUrl
+      payphone_api_url: this.payphoneApiUrl,
+      payphone_store_id: this.payphoneStoreId,
+      payphone_token: this.payphoneToken,
     };
 
-    Object.entries(requiredConfigs).forEach(([key, value]) => {
-      if (!value) {
-        this.logger.error(`❌ Configuración faltante en .env: ${key}`);
-        throw new Error(`Configuración faltante en .env: ${key}`);
-      }
-    });
+    const faltantes = Object.entries(requiredConfigs)
+      .filter(([, v]) => !v)
+      .map(([k]) => k);
 
-    this.logger.log(`✅ Payphone configurado - Store ID: ${this.payphoneStoreId}`);
-    this.logger.log(`✅ Frontend URL: ${this.frontendUrl}`);
-    this.logger.log(`✅ Backend URL: ${this.backendUrl}`);
+    if (faltantes.length) {
+      this.logger.warn(`⚠️  Payphone sin configurar: ${faltantes.join(', ')} (configúralo en el panel admin)`);
+    } else {
+      this.logger.log(`✅ Payphone configurado - Store ID: ${this.payphoneStoreId}`);
+    }
     this.logger.log(`✅ Response URL: ${this.backendUrl}/api/payments/payphone-confirm`);
-    this.logger.log(`✅ Timeout configurado: ${this.timeout}ms`);
   }
 
   // ✅ MÉTODO AUXILIAR PARA ESPERAR (DELAY)

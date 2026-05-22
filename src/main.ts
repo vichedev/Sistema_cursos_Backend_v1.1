@@ -126,7 +126,8 @@ async function bootstrap() {
     logger.log('🔒 Helmet con CSP activado');
 
     // VULN-04: Rate limiting global — excluye SSE y rutas de lectura frecuente
-    // El limiter debe crearse UNA sola vez al iniciar, no dentro del request handler
+    // El limitador se crea UNA sola vez (no dentro del handler) — express-rate-limit v8
+    // lanza ERR_ERL_CREATED_IN_REQUEST_HANDLER si se instancia por cada request.
     const globalLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 500,

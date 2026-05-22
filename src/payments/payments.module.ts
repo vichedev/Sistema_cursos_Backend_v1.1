@@ -2,7 +2,6 @@
 import { Module } from '@nestjs/common';
 import { PayphoneService } from './payphone.service';
 import { PaymentsController } from './payments.controller';
-import { MailService } from '../common/mail.service';
 import { CoursesModule } from '../courses/courses.module';
 import { UsersModule } from '../users/users.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -27,6 +26,8 @@ import { CouponUsage } from '../coupons/coupon-usage.entity'; // ✅ AGREGAR EST
     ])
   ],
   controllers: [PaymentsController],
-  providers: [PayphoneService, MailService],
+  // MailService viene de CommonModule (@Global) — no se declara aquí para
+  // evitar una segunda instancia con su propio pool/cola SMTP.
+  providers: [PayphoneService],
 })
 export class PaymentsModule { }

@@ -21,6 +21,13 @@ import { CouponUsage } from './coupons/coupon-usage.entity';
 import { CouponsModule } from './coupons/coupons.module';
 // ✅ NUEVO: módulo de diplomas
 import { DiplomasModule } from './diplomas/diplomas.module';
+// ✅ NUEVO: configuración, WhatsApp nativo y campañas/publicidad
+import { Setting } from './settings/setting.entity';
+import { SettingsModule } from './settings/settings.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { Campaign } from './campaigns/campaign.entity';
+import { CampaignRecipient } from './campaigns/campaign-recipient.entity';
+import { CampaignsModule } from './campaigns/campaigns.module';
 
 @Module({
   imports: [
@@ -34,7 +41,7 @@ import { DiplomasModule } from './diplomas/diplomas.module';
         username: config.get('DB_USER'),
         password: config.get('DB_PASS'),
         database: config.get('DB_NAME'),
-        entities: [User, Course, StudentCourse, PaymentAttempt, Coupon, CouponUsage],
+        entities: [User, Course, StudentCourse, PaymentAttempt, Coupon, CouponUsage, Setting, Campaign, CampaignRecipient],
         // VULN-01: synchronize solo en desarrollo — en producción usar migraciones
         synchronize: config.get('NODE_ENV') !== 'production',
       }),
@@ -42,6 +49,9 @@ import { DiplomasModule } from './diplomas/diplomas.module';
     }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 600 }]),
+    // ✅ Configuración global (debe ir antes de CommonModule: MailService la consume)
+    SettingsModule,
+    WhatsappModule,
     CommonModule,
     AuthModule,
     UsersModule,
@@ -52,6 +62,8 @@ import { DiplomasModule } from './diplomas/diplomas.module';
     CouponsModule,
     // ✅ NUEVO
     DiplomasModule,
+    // ✅ NUEVO: campañas / publicidad
+    CampaignsModule,
   ],
 })
 export class AppModule { }
