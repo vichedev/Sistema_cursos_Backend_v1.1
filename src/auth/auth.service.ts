@@ -4,7 +4,7 @@ import {
   NotFoundException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -270,6 +270,55 @@ export class AuthService {
       success: true,
       message: 'Usuario verificado manualmente con éxito',
       user: { id: user.id, nombres: user.nombres, apellidos: user.apellidos, correo: user.correo, emailVerified: true },
+    };
+  }
+
+  /**
+   * Verificación MASIVA. Verifica los usuarios cuyos IDs se reciben (solo los
+   * que aún están sin verificar). La actualización en BD es inmediata; las
+   * notificaciones por correo se encolan en segundo plano (no bloquean).
+   */
+  async verifyUsersBulk(ids: number[]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('No se recibieron usuarios para verificar');
+    }
+    const cleanIds = [...new Set(ids.map((n) => Number(n)).filter((n) => Number.isFinite(n)))];
+    const users = await this.userRepo.find({
+      where: { id: In(cleanIds), emailVerified: false },
+    });
+
+    if (users.length === 0) {
+      return { success: true, verified: 0, message: 'No había usuarios pendientes por verificar' };
+    }
+
+    await this.userRepo.update(
+      { id: In(users.map((u) => u.id)) },
+      { emailVerified: true, emailVerificationToken: null, emailVerificationSentAt: new Date(), activo: true },
+    );
+    this.logger.log(`✅ Verificación masiva: ${users.length} usuario(s) verificados por administrador`);
+
+    // Notificaciones por correo en segundo plano (best-effort, encoladas con anti-baneo).
+    for (const user of users) {
+      this.mailService
+        .sendMail(
+          user.correo,
+          'Cuenta verificada - Cursos MAAT',
+          `
+        <div style="font-family: Arial, sans-serif; color:#222;">
+          <h2>¡Cuenta verificada exitosamente!</h2>
+          <p>Hola <b>${user.nombres}</b>,</p>
+          <p>Tu cuenta ha sido verificada por nuestro equipo administrativo. Ya puedes iniciar sesión y acceder a todos los cursos.</p>
+          <p>¡Bienvenido a Cursos MAAT!</p>
+          <hr><small>Sistema de Cursos MAAT</small>
+        </div>`,
+        )
+        .catch((e) => this.logger.warn(`No se pudo notificar a ${user.correo}: ${e.message}`));
+    }
+
+    return {
+      success: true,
+      verified: users.length,
+      message: `${users.length} usuario(s) verificados con éxito`,
     };
   }
 

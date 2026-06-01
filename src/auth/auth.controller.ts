@@ -86,6 +86,14 @@ export class AuthController {
     return this.authService.verifyUserManually(userId);
   }
 
+  /** Verificación masiva de usuarios (por lista de IDs). */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Post('admin/verify-users')
+  async verifyUsersBulk(@Body('ids') ids: number[]) {
+    return this.authService.verifyUsersBulk(ids);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('usuarios')
