@@ -13,6 +13,7 @@ import { NotificationsSseService } from '../notifications/notifications.sse.serv
 import { CouponsService } from '../coupons/coupons.service';
 import { isDateOnlyExpired } from '../common/date.util';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class CoursesService {
@@ -30,6 +31,7 @@ export class CoursesService {
     private readonly sse: NotificationsSseService,
     private readonly couponsService: CouponsService,
     private readonly whatsapp: WhatsappService,
+    private readonly settings: SettingsService,
   ) { }
 
   // ===============================
@@ -215,9 +217,18 @@ export class CoursesService {
       }
 
       let completed = 0;
-      const batchSize = 10;
-      const delayBetweenBatches = 2 * 60 * 1000; // 2 minutos entre lotes
-      const totalBatches = Math.ceil(total / batchSize);
+      // Plan anti-baneo automático: el sistema decide tamaño de lote y pausa
+      // entre lotes según cuántos estudiantes hay y el canal usado.
+      const canal: 'email' | 'whatsapp' | 'mixed' =
+        correo && whatsapp ? 'mixed' : whatsapp ? 'whatsapp' : 'email';
+      const plan = this.settings.getAutoThrottlePlan(total, canal);
+      const batchSize = plan.batchSize;
+      const delayBetweenBatches = plan.batchPauseMs; // pausa entre lotes
+      const totalBatches = plan.totalBatches;
+      this.logger.log(
+        `📢 Plan auto: ${total} estudiantes en ${totalBatches} lote(s) de ${batchSize}, ` +
+          `pausa ${Math.round(delayBetweenBatches / 1000)}s entre lotes (~${Math.round(plan.etaMs / 1000)}s total)`,
+      );
 
       for (let i = 0; i < total; i += batchSize) {
         const batch = estudiantes.slice(i, i + batchSize);

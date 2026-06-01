@@ -54,6 +54,17 @@ const DEFAULTS: Record<string, { env?: string; def: string; secret?: boolean }> 
   soporte_telefono: { env: 'TELEFONO_SOPORTE', def: '' },
   correos_admin_extra: { env: 'CORREOS_ADMIN_EXTRA', def: '' },
 
+  // ── Contacto público (se muestra en la landing) ──────────────────────────
+  contacto_whatsapp: { def: '+593979860095' },
+  contacto_whatsapp_nota: { def: 'Chat directo 24/7' },
+  contacto_correo: { def: 'cursos@maat.ec' },
+  contacto_correo_nota: { def: 'Respuesta en 24h' },
+  contacto_pais: { def: 'ECUADOR' },
+  contacto_ciudad: { def: 'Guayaquil' },
+  contacto_grupo: { def: '✨Grupo Maat✨' },
+  // Correo que RECIBE los mensajes del formulario de contacto (vacío = usa contacto_correo / soporte).
+  contacto_destino: { def: '' },
+
   // ── General ──────────────────────────────────────────────────────────────
   frontend_url: { env: 'FRONTEND_URL', def: 'http://localhost:5173' },
 };
@@ -83,6 +94,7 @@ export type SettingsChangeGroup =
   | 'mail'
   | 'ai'
   | 'payphone'
+  | 'contacto'
   | 'general';
 
 @Injectable()
@@ -183,6 +195,7 @@ export class SettingsService implements OnModuleInit {
     if (key.startsWith('wa_')) return 'whatsapp';
     if (key.startsWith('ai_')) return 'ai';
     if (key.startsWith('payphone_')) return 'payphone';
+    if (key.startsWith('contacto_')) return 'contacto';
     return 'general';
   }
 
@@ -238,6 +251,29 @@ export class SettingsService implements OnModuleInit {
     };
   }
 
+  /** Datos de contacto que se muestran públicamente en la landing. */
+  getContactConfig() {
+    return {
+      whatsapp: this.get('contacto_whatsapp'),
+      whatsappNota: this.get('contacto_whatsapp_nota'),
+      correo: this.get('contacto_correo'),
+      correoNota: this.get('contacto_correo_nota'),
+      pais: this.get('contacto_pais'),
+      ciudad: this.get('contacto_ciudad'),
+      grupo: this.get('contacto_grupo'),
+    };
+  }
+
+  /** Correo que recibe los mensajes del formulario de contacto. */
+  getContactDestino(): string {
+    return (
+      this.get('contacto_destino') ||
+      this.get('contacto_correo') ||
+      this.get('soporte_correo') ||
+      this.getSmtpConfig().user
+    );
+  }
+
   getWhatsappConfig() {
     return {
       enabled: this.getBool('wa_enabled'),
@@ -246,6 +282,52 @@ export class SettingsService implements OnModuleInit {
       batchSize: this.getInt('wa_batch_size', 15),
       batchPauseMs: this.getInt('wa_batch_pause_ms', 120000),
     };
+  }
+
+  /**
+   * Calcula automáticamente un plan de envío por lotes (anti-baneo) en función
+   * de cuántos destinatarios hay. A mayor audiencia, ritmo más conservador para
+   * evitar bloqueos del servidor de correo / WhatsApp.
+   *
+   * Devuelve los parámetros efectivos + cuántos lotes saldrán y el tiempo
+   * estimado total. Lo usan tanto las campañas como las notificaciones de curso.
+   *
+   * @param total    Número de destinatarios.
+   * @param channel  Canal predominante: 'whatsapp' usa la config de WhatsApp
+   *                 (más lenta); cualquier otro valor usa la de correo.
+   * @param overrides Valores fijados manualmente que tienen prioridad (null/undefined = auto).
+   */
+  getAutoThrottlePlan(
+    total: number,
+    channel: 'email' | 'whatsapp' | 'mixed' = 'email',
+    overrides: { batchSize?: number | null; delayMs?: number | null; batchPauseMs?: number | null } = {},
+  ) {
+    const wa = this.getWhatsappConfig();
+    const mail = this.getMailThrottleConfig();
+    const usaWa = channel === 'whatsapp' || channel === 'mixed';
+
+    let batchSize = overrides.batchSize ?? (usaWa ? wa.batchSize : mail.batchSize);
+    let delayMs = overrides.delayMs ?? (usaWa ? wa.delayMinMs : mail.delayMs);
+    let batchPauseMs = overrides.batchPauseMs ?? (usaWa ? wa.batchPauseMs : mail.batchPauseMs);
+
+    // Salvaguardas: nunca valores inválidos.
+    batchSize = Math.max(1, Math.round(batchSize));
+    delayMs = Math.max(0, Math.round(delayMs));
+    batchPauseMs = Math.max(0, Math.round(batchPauseMs));
+
+    // Escalado conservador para audiencias grandes (solo si NO se fijó manualmente).
+    const n = Math.max(0, Number(total) || 0);
+    if (overrides.batchPauseMs == null) {
+      if (n > 1000) batchPauseMs = Math.round(batchPauseMs * 1.5);
+      else if (n > 300) batchPauseMs = Math.round(batchPauseMs * 1.25);
+    }
+
+    const totalBatches = n > 0 ? Math.ceil(n / batchSize) : 0;
+    // Tiempo estimado: una pausa entre mensajes por cada envío + pausa entre lotes
+    // por cada lote completado salvo el último.
+    const etaMs = n > 0 ? n * delayMs + Math.max(0, totalBatches - 1) * batchPauseMs : 0;
+
+    return { batchSize, delayMs, batchPauseMs, total: n, totalBatches, etaMs };
   }
 
   /**

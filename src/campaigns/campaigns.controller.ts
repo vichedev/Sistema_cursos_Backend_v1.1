@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Param,
+  Query,
   Body,
   UploadedFiles,
   UseInterceptors,
@@ -41,6 +43,12 @@ export class CampaignsController {
     return { success: true, data: await this.campaigns.findAll() };
   }
 
+  /** Previsualiza la audiencia y el plan de envío de un segmento (sin guardar). */
+  @Get('audience')
+  async audience(@Query() query: any) {
+    return { success: true, data: await this.campaigns.previewAudience(query) };
+  }
+
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return { success: true, data: await this.campaigns.getDetail(id) };
@@ -61,6 +69,23 @@ export class CampaignsController {
       await this.campaigns.send(campaign.id);
     }
     return { success: true, data: campaign, message: 'Campaña creada correctamente' };
+  }
+
+  /** Edita una campaña editable (borrador/programada/cancelada/fallida). */
+  @Put(':id')
+  @UseInterceptors(FilesInterceptor('imagenes', 5, imageUploadOptions))
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    const nuevasImagenes = (files || []).map((f) => f.filename);
+    const campaign = await this.campaigns.update(id, body, nuevasImagenes);
+
+    if (body.enviarAhora === 'true' || body.enviarAhora === true) {
+      await this.campaigns.send(campaign.id);
+    }
+    return { success: true, data: campaign, message: 'Campaña actualizada correctamente' };
   }
 
   @Post(':id/send')

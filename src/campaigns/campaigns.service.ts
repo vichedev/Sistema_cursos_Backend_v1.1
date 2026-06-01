@@ -100,6 +100,126 @@ export class CampaignsService {
     return saved;
   }
 
+  /** Estados en los que una campaña todavía se puede editar. */
+  private readonly EDITABLE = new Set(['BORRADOR', 'PROGRAMADA', 'CANCELADA', 'FALLIDA']);
+
+  /**
+   * Actualiza una campaña editable (borrador / programada / cancelada / fallida)
+   * y reconstruye su lista de destinatarios. Permite conservar imágenes ya
+   * subidas (imagenesExistentes) y añadir nuevas.
+   */
+  async update(id: number, data: any, nuevasImagenes: string[]): Promise<Campaign> {
+    const campaign = await this.findOne(id);
+    if (this.running.has(id) || !this.EDITABLE.has(campaign.estado)) {
+      throw new BadRequestException(
+        `No se puede editar una campaña en estado ${campaign.estado}. Solo se editan borradores, programadas, canceladas o fallidas.`,
+      );
+    }
+
+    const canalEmail = this.toBool(data.canalEmail, campaign.canalEmail);
+    const canalWhatsapp = this.toBool(data.canalWhatsapp, campaign.canalWhatsapp);
+    if (!canalEmail && !canalWhatsapp) {
+      throw new BadRequestException('Selecciona al menos un canal (correo o WhatsApp)');
+    }
+
+    // Imágenes: conservar las indicadas + añadir las nuevas; borrar del disco las descartadas.
+    const conservadas = this.parseStringArray(data.imagenesExistentes);
+    const previas = campaign.imagenes || [];
+    const finales = [...previas.filter((img) => conservadas.includes(img)), ...nuevasImagenes];
+    for (const img of previas) {
+      if (!finales.includes(img)) this.deleteImageFile(img);
+    }
+
+    let programadaPara: Date | null = null;
+    if (data.programadaPara) {
+      const d = new Date(data.programadaPara);
+      if (!isNaN(d.getTime())) programadaPara = d;
+    }
+
+    campaign.nombre = data.nombre ?? campaign.nombre;
+    campaign.asunto = data.asunto ?? campaign.asunto;
+    campaign.titulo = data.titulo ?? campaign.titulo;
+    campaign.mensaje = data.mensaje ?? campaign.mensaje;
+    campaign.imagenes = finales.length ? finales : null;
+    campaign.canalEmail = canalEmail;
+    campaign.canalWhatsapp = canalWhatsapp;
+    campaign.segmento = (data.segmento || campaign.segmento || 'TODOS').toUpperCase();
+    campaign.cursoId = data.cursoId ? Number(data.cursoId) : null;
+    if (data.destinatariosManual !== undefined) {
+      campaign.destinatariosManual = this.parseManual(data.destinatariosManual);
+    }
+    campaign.programadaPara = programadaPara;
+    campaign.batchSize = data.batchSize ? Number(data.batchSize) : null;
+    campaign.delayMs = data.delayMs ? Number(data.delayMs) : null;
+    campaign.batchPauseMs = data.batchPauseMs ? Number(data.batchPauseMs) : null;
+    campaign.estado = programadaPara ? 'PROGRAMADA' : 'BORRADOR';
+    // Reinicia el progreso porque se reconstruye la audiencia.
+    campaign.enviadosEmail = 0;
+    campaign.enviadosWhatsapp = 0;
+    campaign.fallidos = 0;
+    campaign.startedAt = null;
+    campaign.finishedAt = null;
+
+    const saved = await this.campaignRepo.save(campaign);
+
+    // Reconstruir destinatarios desde cero.
+    const recipients = await this.buildRecipients(saved);
+    if (recipients.length === 0) {
+      throw new BadRequestException(
+        'No se encontraron destinatarios válidos para el segmento seleccionado',
+      );
+    }
+    await this.recipientRepo.delete({ campaignId: saved.id });
+    await this.recipientRepo.save(
+      recipients.map((r) =>
+        this.recipientRepo.create({
+          campaignId: saved.id,
+          userId: r.userId ?? null,
+          nombre: r.nombre || '',
+          correo: r.correo || null,
+          celular: r.celular || null,
+          emailEstado: canalEmail && r.correo ? 'PENDIENTE' : 'OMITIDO',
+          whatsappEstado: canalWhatsapp && r.celular ? 'PENDIENTE' : 'OMITIDO',
+        }),
+      ),
+    );
+    saved.total = recipients.length;
+    await this.campaignRepo.save(saved);
+
+    this.logger.log(`✏️  Campaña #${saved.id} actualizada — ${recipients.length} destinatarios (${saved.estado})`);
+    return saved;
+  }
+
+  /**
+   * Previsualiza la audiencia de un segmento (sin persistir) y devuelve el plan
+   * de envío automático calculado para ese tamaño. Lo usa el formulario para
+   * mostrar en vivo cuántos destinatarios hay y cuántos lotes saldrán.
+   */
+  async previewAudience(query: {
+    segmento?: string;
+    cursoId?: any;
+    canalEmail?: any;
+    canalWhatsapp?: any;
+    destinatariosManual?: any;
+  }) {
+    const canalEmail = this.toBool(query.canalEmail, true);
+    const canalWhatsapp = this.toBool(query.canalWhatsapp, false);
+    const pseudo = {
+      segmento: (query.segmento || 'TODOS').toUpperCase(),
+      cursoId: query.cursoId ? Number(query.cursoId) : null,
+      canalEmail,
+      canalWhatsapp,
+      destinatariosManual: this.parseManual(query.destinatariosManual),
+    } as Campaign;
+
+    const recipients = await this.buildRecipients(pseudo);
+    const conCorreo = recipients.filter((r) => r.correo).length;
+    const conWhatsapp = recipients.filter((r) => r.celular).length;
+    const plan = this.settings.getAutoThrottlePlan(recipients.length, this.channelOf(pseudo));
+
+    return { total: recipients.length, conCorreo, conWhatsapp, plan };
+  }
+
   async findAll(): Promise<Campaign[]> {
     return this.campaignRepo.find({ order: { createdAt: 'DESC' } });
   }
@@ -195,12 +315,6 @@ export class CampaignsService {
 
     try {
       const campaign = await this.findOne(id);
-      const wa = this.settings.getWhatsappConfig();
-      const mailCfg = this.settings.getMailThrottleConfig();
-
-      const batchSize = campaign.batchSize || (campaign.canalWhatsapp ? wa.batchSize : mailCfg.batchSize);
-      const delayMs = campaign.delayMs ?? (campaign.canalWhatsapp ? wa.delayMinMs : mailCfg.delayMs);
-      const batchPauseMs = campaign.batchPauseMs ?? (campaign.canalWhatsapp ? wa.batchPauseMs : mailCfg.batchPauseMs);
 
       await this.campaignRepo.update(id, {
         estado: 'ENVIANDO',
@@ -214,6 +328,19 @@ export class CampaignsService {
       });
       const toProcess = pending.filter(
         (r) => r.emailEstado === 'PENDIENTE' || r.whatsappEstado === 'PENDIENTE',
+      );
+
+      // Plan anti-baneo automático según cuántos quedan por enviar. Los valores
+      // fijados manualmente en la campaña tienen prioridad sobre el cálculo auto.
+      const plan = this.settings.getAutoThrottlePlan(
+        toProcess.length,
+        this.channelOf(campaign),
+        { batchSize: campaign.batchSize, delayMs: campaign.delayMs, batchPauseMs: campaign.batchPauseMs },
+      );
+      const { batchSize, delayMs, batchPauseMs } = plan;
+      this.logger.log(
+        `📦 Campaña #${id}: ${toProcess.length} pendientes en ${plan.totalBatches} lote(s) de ${batchSize}; ` +
+          `~${Math.round(plan.etaMs / 1000)}s estimados`,
       );
 
       const attachments = this.buildEmailAttachments(campaign);
@@ -491,6 +618,36 @@ export class CampaignsService {
   private toBool(v: any, def = false): boolean {
     if (v === undefined || v === null || v === '') return def;
     return v === true || v === 'true' || v === '1' || v === 1;
+  }
+
+  /** Canal predominante de una campaña para elegir la config anti-baneo. */
+  private channelOf(c: { canalEmail?: boolean; canalWhatsapp?: boolean }): 'email' | 'whatsapp' | 'mixed' {
+    if (c.canalWhatsapp && c.canalEmail) return 'mixed';
+    if (c.canalWhatsapp) return 'whatsapp';
+    return 'email';
+  }
+
+  /** Borra del disco una imagen de /uploads de forma segura. */
+  private deleteImageFile(img: string): void {
+    try {
+      const p = join(UPLOADS_DIR, img);
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Parsea un arreglo de strings que pudo llegar como JSON o como valor suelto. */
+  private parseStringArray(v: any): string[] {
+    if (!v) return [];
+    if (Array.isArray(v)) return v.filter((x) => typeof x === 'string');
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === 'string');
+    } catch {
+      if (typeof v === 'string') return [v];
+    }
+    return [];
   }
 
   private parseManual(v: any): Array<any> | null {
