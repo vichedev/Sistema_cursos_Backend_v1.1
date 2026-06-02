@@ -61,3 +61,58 @@ DO $$ BEGIN
       FOREIGN KEY ("campaignId") REFERENCES "campanas"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Categorías de cursos, Material didáctico (recursos) y Logs de acceso
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "categorias" (
+  "id" SERIAL NOT NULL,
+  "nombre" varchar NOT NULL,
+  "descripcion" varchar,
+  "color" varchar,
+  "icono" varchar,
+  "activo" boolean NOT NULL DEFAULT true,
+  "createdAt" timestamp NOT NULL DEFAULT now(),
+  PRIMARY KEY ("id")
+);
+
+-- Columna de categoría en cursos
+ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "categoriaId" integer;
+
+CREATE TABLE IF NOT EXISTS "curso_recursos" (
+  "id" SERIAL NOT NULL,
+  "cursoId" integer NOT NULL,
+  "titulo" varchar NOT NULL,
+  "url" varchar,
+  "archivo" varchar,
+  "nombreOriginal" varchar,
+  "mime" varchar,
+  "size" integer DEFAULT 0,
+  "createdAt" timestamp NOT NULL DEFAULT now(),
+  PRIMARY KEY ("id")
+);
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='FK_curso_recursos_curso') THEN
+    ALTER TABLE "curso_recursos"
+      ADD CONSTRAINT "FK_curso_recursos_curso"
+      FOREIGN KEY ("cursoId") REFERENCES "cursos"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "logs_acceso" (
+  "id" SERIAL NOT NULL,
+  "identificador" varchar NOT NULL,
+  "userId" integer,
+  "nombres" varchar,
+  "rol" varchar,
+  "exito" boolean NOT NULL DEFAULT false,
+  "motivo" varchar NOT NULL,
+  "ip" varchar,
+  "userAgent" varchar,
+  "createdAt" timestamp NOT NULL DEFAULT now(),
+  PRIMARY KEY ("id")
+);
+
+CREATE INDEX IF NOT EXISTS "IDX_logs_acceso_identificador" ON "logs_acceso" ("identificador");
