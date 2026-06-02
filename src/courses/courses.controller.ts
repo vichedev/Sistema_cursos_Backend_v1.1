@@ -153,6 +153,7 @@ export class CoursesController {
       profesorId,
       profesorNombre,
       profesorAsignatura,
+      categoriaId: body.categoriaId ? Number(body.categoriaId) : null,
       precio: Math.round(parseFloat(body.precio || 0) * 100) / 100,
     });
   }
@@ -174,6 +175,13 @@ export class CoursesController {
     if (body.profesorId) updateData.profesorId = Number(body.profesorId);
     if (body.cupos) updateData.cupos = Number(body.cupos);
     if (body.precio) updateData.precio = parseFloat(body.precio);
+    // categoriaId: "" o "null" => quitar categoría; número => asignar
+    if (body.categoriaId !== undefined) {
+      updateData.categoriaId =
+        body.categoriaId === '' || body.categoriaId === 'null' || body.categoriaId === null
+          ? null
+          : Number(body.categoriaId);
+    }
 
     if (file) {
       updateData.imagen = file.filename;
@@ -267,6 +275,7 @@ export class CoursesController {
         fecha: course.fecha,
         hora: course.hora,
         activo: course.activo,
+        categoriaId: course.categoriaId ?? null,
         // ✅ SOLO INDICAR SI HAY CUPONES, SIN CONTADOR
         tieneCupones: cuponesActivos.length > 0
       };
@@ -343,6 +352,45 @@ export class CoursesController {
     return this.coursesService.deleteCoursePermanently(id);
   }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  //  MATERIAL DIDÁCTICO (RECURSOS DEL CURSO)
+  // ───────────────────────────────────────────────────────────────────────────
 
+  /** Lista los materiales de un curso. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/resources')
+  async listResources(@Param('id', ParseIntPipe) id: number) {
+    return { success: true, data: await this.coursesService.listResources(id) };
+  }
 
+  /** Asocia un enlace de material (MEGA, Google Drive, Dropbox, etc.) al curso. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/resources')
+  async addResource(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { titulo?: string; url?: string },
+  ) {
+    return { success: true, data: await this.coursesService.addResourceLink(id, body?.titulo || '', body?.url || '') };
+  }
+
+  /** Elimina un material del curso. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Delete(':id/resources/:resourceId')
+  async deleteResource(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('resourceId', ParseIntPipe) resourceId: number,
+  ) {
+    return this.coursesService.deleteResource(id, resourceId);
+  }
+
+  /** Envía el material seleccionado a los estudiantes inscritos elegidos. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/resources/send')
+  async sendResources(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.coursesService.sendResources(id, body);
+  }
 }

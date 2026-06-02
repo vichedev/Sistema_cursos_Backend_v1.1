@@ -5,6 +5,7 @@ import { diskStorage } from 'multer';
 import { join } from 'path';
 
 import { Course } from './course.entity';
+import { CourseResource } from './course-resource.entity';
 import { StudentCourse } from './student-course.entity';
 import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { User } from '../users/user.entity';
@@ -18,7 +19,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Course, StudentCourse, PaymentAttempt, User]),
+    TypeOrmModule.forFeature([Course, CourseResource, StudentCourse, PaymentAttempt, User]),
     UsersModule,
     CommonModule,
     NotificationsModule,

@@ -669,34 +669,15 @@ export class PaymentsController {
       });
       this.logger.log(`   ✅ PaymentAttempt creado: ${clientTransactionId}`);
 
-      // ✅ ENVIAR NOTIFICACIONES CON MANEJO DE ERRORES DETALLADO
-      this.logger.log(`   📧 Enviando notificaciones...`);
-
-      try {
-        await this.notificationService.sendEnrollmentNotifications(
-          course,
-          usuario,
-          'Gratuito',
+      // ✅ NOTIFICACIONES EN SEGUNDO PLANO (no bloquean la respuesta → inscripción ágil)
+      //    El correo/WhatsApp se envían tras responder; si fallan, no afectan la inscripción.
+      this.logger.log(`   📧 Enviando notificaciones en segundo plano...`);
+      this.notificationService
+        .sendEnrollmentNotifications(course, usuario, 'Gratuito')
+        .then(() => this.logger.log(`   ✅ Notificaciones (gratis) enviadas a ${usuario.correo}`))
+        .catch((notificationError) =>
+          this.logger.error(`   ❌ Error enviando notificaciones (gratis):`, notificationError),
         );
-        this.logger.log(`   ✅ Notificaciones enviadas exitosamente`);
-
-        // ✅ LOGS ESPECÍFICOS DE CADA NOTIFICACIÓN
-        this.logger.log(`      ✉️  Correo enviado a: ${usuario.correo}`);
-
-        if (usuario.celular) {
-          this.logger.log(`      📱 WhatsApp enviado a: ${usuario.celular}`);
-        } else {
-          this.logger.log(
-            `      ⚠️  No se envió WhatsApp: teléfono no disponible`,
-          );
-        }
-      } catch (notificationError) {
-        this.logger.error(
-          `   ❌ Error enviando notificaciones:`,
-          notificationError,
-        );
-        // No lanzamos error aquí para no afectar la inscripción principal
-      }
 
       this.logger.log(`🎉 INSCRIPCIÓN GRATUITA COMPLETADA EXITOSAMENTE`);
 
@@ -1197,23 +1178,8 @@ class PaymentNotificationService {
       const linkCurso = course.link || 'Link por confirmar';
       const tieneLinkDisponible = !!course.link;
 
-      // ✅ SOLO AQUÍ SE ENVÍAN LOS RECURSOS (cuando ya está inscrito)
-      const recursosHTML = course.recursosLink
-        ? `
-      <div style="margin-top: 20px; padding: 15px; background: #e8f4fd; border-radius: 8px; border-left: 4px solid #3b82f6;">
-        <h4 style="margin: 0 0 10px 0; color: #1e40af;">📚 Recursos del Curso</h4>
-        <p style="margin: 5px 0;">
-          <a href="${course.recursosLink}" 
-             style="color: #2563eb; text-decoration: underline; word-break: break-all;">
-            ${course.recursosLink}
-          </a>
-        </p>
-        <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">
-          ⬆️ Accede a materiales, presentaciones y documentos exclusivos para inscritos
-        </p>
-      </div>
-    `
-        : '';
+      // ℹ️ El material didáctico ya NO se envía aquí. El administrador decide
+      //    cuándo y a quién enviarlo desde el panel de recursos del curso.
 
       const emailContent = `
       <div style="font-family: Arial, sans-serif; color:#222;">
@@ -1229,9 +1195,7 @@ class PaymentNotificationService {
           <p style="margin: 5px 0;"><b>💰</b> $${course.precio || 0} (${paymentMethod})</p>
           ${tieneLinkDisponible ? `<p style="margin: 5px 0;"><b>🔗</b> <a href="${linkCurso}">Acceder a la clase</a></p>` : ''}
         </div>
-        
-        ${recursosHTML}  <!-- ✅ RECURSOS SOLO PARA INSCRITOS -->
-        
+
         <div style="margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 5px;">
           <h4 style="margin: 0 0 10px 0;">📞 ¿Necesitas ayuda?</h4>
           <p style="margin: 5px 0;"><b>Teléfono:</b> ${this.telefonoSoporte}</p>

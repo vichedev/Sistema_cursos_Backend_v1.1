@@ -12,6 +12,8 @@ import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User, Rol } from '../users/user.entity';
+import { AccessLog } from './access-log.entity';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailQueueService } from '../common/mail-queue.service';
 import { MailService } from '../common/mail.service';
 import * as crypto from 'crypto';
@@ -26,8 +28,17 @@ export class AuthService {
     private configService: ConfigService,
     private mailQueueService: MailQueueService,
     @InjectRepository(User) private userRepo: Repository<User>,
+    @InjectRepository(AccessLog) private accessLogRepo: Repository<AccessLog>,
     private mailService: MailService,
+    private whatsappService: WhatsappService,
   ) { }
+
+  /** Registra (en segundo plano) un intento de acceso para monitoreo. */
+  private recordAccess(data: Partial<AccessLog>) {
+    this.accessLogRepo
+      .save(this.accessLogRepo.create(data))
+      .catch((e) => this.logger.warn(`No se pudo registrar log de acceso: ${e.message}`));
+  }
 
   // ── Helpers privados ──────────────────────────────────────────────────────
 
@@ -110,25 +121,40 @@ export class AuthService {
 
   // ── Login — ahora devuelve accessToken + refreshToken ─────────────────────
 
-  async login(data: LoginDto) {
+  async login(data: LoginDto, meta: { ip?: string; userAgent?: string } = {}) {
+    const ident = data.usuario;
+    const base = { identificador: ident, ip: meta.ip || null, userAgent: meta.userAgent || null };
+
     const user =
       (await this.usersService.findByUsuario(data.usuario)) ||
       (await this.usersService.findByCorreo(data.usuario));
 
     if (!user) {
+      this.recordAccess({ ...base, exito: false, motivo: 'Usuario no encontrado' });
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
+    const userInfo = {
+      ...base,
+      userId: user.id,
+      nombres: `${user.nombres} ${user.apellidos}`.trim(),
+      rol: user.rol,
+    };
+
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
     if (!isPasswordValid) {
+      this.recordAccess({ ...userInfo, exito: false, motivo: 'Contraseña incorrecta' });
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
 
     if (!user.emailVerified) {
+      this.recordAccess({ ...userInfo, exito: false, motivo: 'Cuenta no verificada' });
       throw new ForbiddenException(
         'Cuenta no verificada. Por favor verifica tu correo electrónico antes de iniciar sesión.',
       );
     }
+
+    this.recordAccess({ ...userInfo, exito: true, motivo: 'Ingreso correcto' });
 
     const accessToken = this.signAccessToken(user.id, user.rol);
     const refreshToken = this.signRefreshToken(user.id, user.rol);
@@ -144,6 +170,152 @@ export class AuthService {
       nombres: user.nombres,
       userId: user.id,
     };
+  }
+
+  // ── Logs de acceso (panel admin) ──────────────────────────────────────────
+  async getAccessLogs(query: {
+    page?: number | string;
+    limit?: number | string;
+    search?: string;
+    estado?: string; // todos | exito | fallido
+    rol?: string;
+  }) {
+    const page = Math.max(1, parseInt(String(query.page || 1), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(query.limit || 20), 10) || 20));
+
+    const qb = this.accessLogRepo.createQueryBuilder('log');
+
+    if (query.search) {
+      qb.andWhere('(LOWER(log.identificador) LIKE :s OR LOWER(log.nombres) LIKE :s)', {
+        s: `%${query.search.toLowerCase()}%`,
+      });
+    }
+    if (query.estado === 'exito') qb.andWhere('log.exito = :e', { e: true });
+    else if (query.estado === 'fallido') qb.andWhere('log.exito = :e', { e: false });
+    if (query.rol) qb.andWhere('log.rol = :r', { r: query.rol });
+
+    const [data, total] = await qb
+      .orderBy('log.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    // Enriquecer con datos de contacto (correo / celular) para los botones de ayuda
+    const userIds = [...new Set(data.map((l) => l.userId).filter(Boolean))] as number[];
+    const userMap = new Map<number, User>();
+    if (userIds.length) {
+      const users = await this.userRepo.find({
+        where: { id: In(userIds) },
+        select: ['id', 'correo', 'celular'],
+      });
+      users.forEach((u) => userMap.set(u.id, u));
+    }
+    const esEmail = (s: string) => /.+@.+\..+/.test(s || '');
+    const enriched = data.map((l) => {
+      const u = l.userId ? userMap.get(l.userId) : null;
+      return {
+        ...l,
+        correo: u?.correo || (esEmail(l.identificador) ? l.identificador : null),
+        celular: u?.celular || null,
+      };
+    });
+
+    // Resumen rápido para tarjetas
+    const totalIntentos = await this.accessLogRepo.count();
+    const fallidos = await this.accessLogRepo.count({ where: { exito: false } });
+
+    return {
+      data: enriched,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      resumen: { totalIntentos, fallidos, exitosos: totalIntentos - fallidos },
+    };
+  }
+
+  /**
+   * Contacta a un usuario que tuvo problemas de acceso, por correo (envío
+   * automático con plantilla de ayuda) o WhatsApp (devuelve un link wa.me con
+   * mensaje pre-escrito para que el admin lo envíe).
+   */
+  async contactAccessLog(id: number, canal: 'email' | 'whatsapp') {
+    const log = await this.accessLogRepo.findOne({ where: { id } });
+    if (!log) throw new NotFoundException('Registro no encontrado');
+
+    // Resolver el usuario para obtener correo/celular
+    let user: User | null = log.userId
+      ? await this.userRepo.findOne({ where: { id: log.userId } })
+      : null;
+    if (!user) {
+      user =
+        (await this.usersService.findByCorreo(log.identificador)) ||
+        (await this.usersService.findByUsuario(log.identificador)) ||
+        null;
+    }
+
+    const esEmail = (s: string) => /.+@.+\..+/.test(s || '');
+    const nombre = (user?.nombres || log.nombres || '').trim() || 'estudiante';
+    const correo = user?.correo || (esEmail(log.identificador) ? log.identificador : null);
+    const celular = user?.celular || null;
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+
+    if (canal === 'whatsapp') {
+      if (!celular) {
+        throw new BadRequestException('Este usuario no tiene un número de WhatsApp registrado');
+      }
+      // Enviar por la API de WhatsApp conectada (sesión de Configuración)
+      if (!this.whatsappService.getStatus().connected) {
+        throw new BadRequestException(
+          'WhatsApp no está conectado. Conéctalo en Configuración → WhatsApp e inténtalo de nuevo.',
+        );
+      }
+      const texto =
+        `Hola ${nombre}, te escribimos de *MAAT Academy* 👋\n\n` +
+        `Notamos que tuviste problemas para ingresar a la plataforma. Queremos ayudarte 🙌\n\n` +
+        `¿Cuál fue el inconveniente?\n` +
+        `• ¿Olvidaste tu *contraseña*?\n` +
+        `• ¿No recuerdas tu *usuario o correo*?\n` +
+        `• ¿Tu cuenta aún no está *verificada*?\n\n` +
+        `Respóndenos y te ayudamos a recuperar tu acceso. 🔐`;
+      try {
+        await this.whatsappService.sendText(celular, texto);
+      } catch (e: any) {
+        throw new BadRequestException(`No se pudo enviar el WhatsApp: ${e.message}`);
+      }
+      return { success: true, canal, message: `Mensaje de WhatsApp enviado a ${celular}` };
+    }
+
+    // canal === 'email'
+    if (!correo) {
+      throw new BadRequestException('No hay un correo válido para contactar a este usuario');
+    }
+    const html = `
+<div style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+  <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);padding:20px 24px;border-radius:14px 14px 0 0">
+    <h2 style="color:#fff;margin:0">🔐 ¿Tuviste problemas para ingresar?</h2>
+  </div>
+  <div style="border:1px solid #eee;border-top:none;border-radius:0 0 14px 14px;padding:24px;line-height:1.6">
+    <p>Hola <b>${this.escapeHtmlBasic(nombre)}</b>,</p>
+    <p>Notamos que tuviste inconvenientes para acceder a <b>MAAT Academy</b> y queremos ayudarte. 🙌</p>
+    <p><b>¿Cuál fue el problema?</b></p>
+    <ul>
+      <li>¿Olvidaste tu <b>contraseña</b>? Restablécela aquí:
+        <a href="${frontendUrl}/forgot-password" style="color:#2563eb">Recuperar contraseña</a>.</li>
+      <li>¿No recuerdas tu <b>usuario o correo</b>? Responde a este mensaje y te ayudamos.</li>
+      <li>¿Tu cuenta aún no está <b>verificada</b>? Avísanos y la activamos por ti.</li>
+    </ul>
+    <p style="margin-top:16px">Si necesitas asistencia directa, simplemente <b>responde a este correo</b> contándonos qué ocurrió.</p>
+    <hr><small>Equipo de soporte · MAAT Academy</small>
+  </div>
+</div>`.trim();
+
+    await this.mailService.sendMail(correo, '¿Necesitas ayuda para ingresar? — MAAT Academy', html);
+    return { success: true, canal, message: `Correo de ayuda enviado a ${correo}` };
+  }
+
+  private escapeHtmlBasic(s: string): string {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   // ── Refresh Token — genera nuevo accessToken sin re-login ─────────────────

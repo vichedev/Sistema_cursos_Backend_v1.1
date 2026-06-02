@@ -56,6 +56,10 @@ export class Course {
   @Column({ default: true })
   activo: boolean;
 
+  /** Categoría del curso (MikroTik, Redes, Seguridad, etc.). */
+  @Column({ type: 'int', nullable: true })
+  categoriaId: number | null;
+
   @OneToMany(() => StudentCourse, (studentCourse) => studentCourse.curso)
   studentCourses: StudentCourse[];
 

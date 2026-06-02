@@ -10,13 +10,14 @@ import { RolesGuard } from './roles.guard';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from '../common/common.module';
 import { User } from '../users/user.entity';
+import { AccessLog } from './access-log.entity';
 
 @Module({
   imports: [
     UsersModule,
     ConfigModule,
     CommonModule,
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, AccessLog]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

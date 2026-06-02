@@ -1,8 +1,11 @@
 // src/courses/courses.service.ts
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { join } from 'path';
+import { existsSync, unlinkSync } from 'fs';
 import { Course } from './course.entity';
+import { CourseResource } from './course-resource.entity';
 import { StudentCourse } from './student-course.entity';
 import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { UsersService } from '../users/users.service';
@@ -21,6 +24,8 @@ export class CoursesService {
 
   constructor(
     @InjectRepository(Course) private repo: Repository<Course>,
+    @InjectRepository(CourseResource)
+    private resourceRepo: Repository<CourseResource>,
     @InjectRepository(StudentCourse)
     private studentCourseRepo: Repository<StudentCourse>,
     @InjectRepository(PaymentAttempt)
@@ -375,7 +380,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -393,7 +398,7 @@ ${frontendUrl}
       select: {
         id: true, titulo: true, descripcion: true, imagen: true,
         tipo: true, cupos: true, link: true, recursosLink: true,
-        precio: true, fecha: true, hora: true, activo: true,
+        precio: true, fecha: true, hora: true, activo: true, categoriaId: true,
         createdAt: true, updatedAt: true,
         profesor: { id: true, nombres: true, apellidos: true, asignatura: true },
       },
@@ -518,7 +523,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -566,6 +571,153 @@ ${frontendUrl}
   }
 
   // ===============================
+  // ✅ MATERIAL DIDÁCTICO (RECURSOS DEL CURSO)
+  // ===============================
+  private get UPLOADS_DIR() {
+    return join(process.cwd(), 'uploads');
+  }
+
+  private deleteResourceFile(archivo: string) {
+    try {
+      const p = join(this.UPLOADS_DIR, archivo);
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private escapeHtml(s: string): string {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /** Asocia un enlace de material (MEGA, Drive, etc.) al curso. */
+  async addResourceLink(cursoId: number, titulo: string, url: string) {
+    const course = await this.repo.findOne({ where: { id: cursoId } });
+    if (!course) throw new NotFoundException('Curso no encontrado');
+
+    const nombre = (titulo || '').trim();
+    const enlace = (url || '').trim();
+    if (!enlace) throw new BadRequestException('El enlace es obligatorio');
+    if (!/^https?:\/\/.+/i.test(enlace)) {
+      throw new BadRequestException('El enlace debe empezar con http:// o https://');
+    }
+
+    const saved = await this.resourceRepo.save(
+      this.resourceRepo.create({
+        cursoId,
+        titulo: nombre || enlace,
+        url: enlace,
+      }),
+    );
+    this.logger.log(`🔗 Enlace de material añadido al curso ${cursoId}`);
+    return saved;
+  }
+
+  async listResources(cursoId: number) {
+    return this.resourceRepo.find({ where: { cursoId }, order: { createdAt: 'DESC' } });
+  }
+
+  async deleteResource(cursoId: number, resourceId: number) {
+    const r = await this.resourceRepo.findOne({ where: { id: resourceId, cursoId } });
+    if (!r) throw new NotFoundException('Material no encontrado');
+    // Legacy: si fue una subida directa, eliminar el archivo del disco.
+    if (r.archivo) this.deleteResourceFile(r.archivo);
+    await this.resourceRepo.delete(r.id);
+    return { success: true, message: 'Material eliminado' };
+  }
+
+  /**
+   * Envía por correo (con adjuntos) el material seleccionado a los estudiantes
+   * inscritos elegidos. El envío se encola en el MailService (anti-baneo) y
+   * ocurre en segundo plano; la respuesta vuelve de inmediato.
+   */
+  async sendResources(
+    cursoId: number,
+    body: { resourceIds?: number[]; studentIds?: number[] | 'all' },
+  ) {
+    const course = await this.repo.findOne({ where: { id: cursoId } });
+    if (!course) throw new NotFoundException('Curso no encontrado');
+
+    // 1) Materiales a enviar
+    let resources = await this.resourceRepo.find({ where: { cursoId } });
+    if (Array.isArray(body.resourceIds) && body.resourceIds.length) {
+      const set = new Set(body.resourceIds.map(Number));
+      resources = resources.filter((r) => set.has(r.id));
+    }
+    if (resources.length === 0) {
+      throw new BadRequestException('No hay materiales seleccionados para enviar');
+    }
+
+    // 2) Estudiantes destinatarios (inscritos, con correo)
+    const inscripciones = await this.studentCourseRepo.find({
+      where: { cursoId },
+      relations: ['estudiante'],
+    });
+    let estudiantes = inscripciones.map((i) => i.estudiante).filter((e) => e && e.correo);
+
+    const filtrarIds = Array.isArray(body.studentIds) && body.studentIds.length > 0;
+    if (filtrarIds) {
+      const set = new Set((body.studentIds as number[]).map(Number));
+      estudiantes = estudiantes.filter((e) => set.has(e.id));
+    }
+    // Deduplicar por id
+    const seen = new Set<number>();
+    estudiantes = estudiantes.filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
+
+    if (estudiantes.length === 0) {
+      throw new BadRequestException('No hay estudiantes destinatarios con correo válido');
+    }
+
+    // 3) Lista de enlaces (botones) para el correo
+    const enlacesHtml = resources
+      .filter((r) => r.url)
+      .map(
+        (r) => `
+      <div style="margin:10px 0">
+        <a href="${this.escapeHtml(r.url)}" target="_blank"
+           style="display:inline-block;background:#ff6b35;color:#fff;text-decoration:none;padding:11px 22px;border-radius:10px;font-weight:bold;font-size:14px">
+          📥 ${this.escapeHtml(r.titulo)}
+        </a>
+      </div>`,
+      )
+      .join('');
+
+    // 4) Encolar correos (el MailService los espacia para evitar baneos)
+    for (const est of estudiantes) {
+      const html = `
+<div style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
+  <div style="background:linear-gradient(135deg,#ff6b35,#f7931e);padding:20px 24px;border-radius:14px 14px 0 0">
+    <h2 style="color:#fff;margin:0">📚 Material del curso</h2>
+  </div>
+  <div style="border:1px solid #eee;border-top:none;border-radius:0 0 14px 14px;padding:24px;line-height:1.6">
+    <p>Hola <b>${this.escapeHtml(est.nombres || '')}</b>,</p>
+    <p>Te compartimos el material didáctico del curso <b>${this.escapeHtml(course.titulo)}</b>. Accede desde los siguientes enlaces:</p>
+    ${enlacesHtml}
+    <div style="margin-top:18px;padding:12px 16px;background:#fff7ed;border-left:4px solid #f59e0b;border-radius:8px">
+      <p style="margin:0;color:#92400e;font-size:14px">⏳ <b>Importante:</b> estos enlaces estarán disponibles por <b>7 días</b>. Descarga el material a tiempo.</p>
+    </div>
+    <p style="color:#6b7280;font-size:13px;margin-top:16px">Si tienes problemas para abrir algún enlace, responde a este correo.</p>
+    <hr><small>MAAT Academy</small>
+  </div>
+</div>`.trim();
+
+      this.mail
+        .sendMail(est.correo, `📚 Material del curso: ${course.titulo}`, html)
+        .catch((e) => this.logger.warn(`No se pudo enviar material a ${est.correo}: ${e.message}`));
+    }
+
+    this.logger.log(
+      `📤 Material del curso ${cursoId}: ${resources.length} enlace(s) → ${estudiantes.length} estudiante(s)`,
+    );
+    return {
+      success: true,
+      total: estudiantes.length,
+      recursos: resources.length,
+      message: `Enviando ${resources.length} enlace(s) a ${estudiantes.length} estudiante(s) por correo`,
+    };
+  }
+
+  // ===============================
   // ✅ CURSOS CON ESTADO INSCRITO (dashboard estudiante)
   // ===============================
   async cursosConEstadoInscrito(userId: number) {
@@ -575,7 +727,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -684,7 +836,7 @@ ${frontendUrl}
         .select([
           'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
           'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-          'course.precio', 'course.fecha', 'course.hora', 'course.activo',
+          'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
           'course.createdAt', 'course.updatedAt',
           'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
         ])
@@ -712,7 +864,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -779,6 +931,11 @@ ${frontendUrl}
     try {
       const course = await this.findById(id);
       if (!course) throw new NotFoundException('Curso no encontrado');
+
+      // Eliminar materiales del curso (archivos en disco + filas)
+      const recursos = await this.resourceRepo.find({ where: { cursoId: id } });
+      for (const r of recursos) this.deleteResourceFile(r.archivo);
+      await this.resourceRepo.delete({ cursoId: id });
 
       await this.couponsService.deleteAllCouponsByCourse(id);
       await this.studentCourseRepo.delete({ cursoId: id });

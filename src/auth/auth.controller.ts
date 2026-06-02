@@ -34,11 +34,37 @@ export class AuthController {
 
   @Post('login')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const data = await this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Req() req: any, @Res({ passthrough: true }) res: Response) {
+    const ip =
+      (req.headers?.['x-forwarded-for'] || '').toString().split(',')[0].trim() ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      null;
+    const userAgent = (req.headers?.['user-agent'] || '').toString().slice(0, 255) || null;
+
+    const data = await this.authService.login(dto, { ip, userAgent });
     // VULN-02: Establecer refreshToken como cookie httpOnly para protegerlo de XSS
     res.cookie(REFRESH_TOKEN_COOKIE, data.refreshToken, COOKIE_OPTIONS);
     return data;
+  }
+
+  /** Logs de acceso para el panel admin (monitoreo de ingresos y problemas). */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('access-logs')
+  async getAccessLogs(@Query() query: any) {
+    return { success: true, ...(await this.authService.getAccessLogs(query)) };
+  }
+
+  /** Contacta a un usuario con problemas de acceso (correo automático o link de WhatsApp). */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Post('access-logs/:id/contact')
+  async contactAccessLog(@Param('id') id: number, @Body('canal') canal: 'email' | 'whatsapp') {
+    if (canal !== 'email' && canal !== 'whatsapp') {
+      throw new BadRequestException('Canal inválido');
+    }
+    return this.authService.contactAccessLog(Number(id), canal);
   }
 
   // Renovar access token usando el refresh token desde cookie httpOnly (o body como fallback)
