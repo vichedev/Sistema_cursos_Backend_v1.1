@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS "categorias" (
 -- Columna de categoría en cursos
 ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "categoriaId" integer;
 
+-- Finalización manual del curso (la decide el admin, no la fecha)
+ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "finalizado" boolean NOT NULL DEFAULT false;
+
 CREATE TABLE IF NOT EXISTS "curso_recursos" (
   "id" SERIAL NOT NULL,
   "cursoId" integer NOT NULL,

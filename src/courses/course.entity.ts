@@ -56,6 +56,10 @@ export class Course {
   @Column({ default: true })
   activo: boolean;
 
+  /** Finalizado MANUALMENTE por el administrador (no por fecha). */
+  @Column({ default: false })
+  finalizado: boolean;
+
   /** Categoría del curso (MikroTik, Redes, Seguridad, etc.). */
   @Column({ type: 'int', nullable: true })
   categoriaId: number | null;

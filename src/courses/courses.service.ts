@@ -380,7 +380,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -398,7 +398,7 @@ ${frontendUrl}
       select: {
         id: true, titulo: true, descripcion: true, imagen: true,
         tipo: true, cupos: true, link: true, recursosLink: true,
-        precio: true, fecha: true, hora: true, activo: true, categoriaId: true,
+        precio: true, fecha: true, hora: true, activo: true, categoriaId: true, finalizado: true,
         createdAt: true, updatedAt: true,
         profesor: { id: true, nombres: true, apellidos: true, asignatura: true },
       },
@@ -408,6 +408,15 @@ ${frontendUrl}
 
   async updateCupos(courseId: number, nuevoCupo: number) {
     await this.repo.update(courseId, { cupos: nuevoCupo });
+  }
+
+  /** Marca/desmarca un curso como finalizado manualmente (lo decide el admin). */
+  async setFinalizado(courseId: number, finalizado: boolean) {
+    const course = await this.repo.findOne({ where: { id: courseId } });
+    if (!course) throw new NotFoundException('Curso no encontrado');
+    await this.repo.update(courseId, { finalizado });
+    this.logger.log(`🏁 Curso ${courseId} ${finalizado ? 'finalizado' : 'reabierto'} por admin`);
+    return { success: true, finalizado, message: finalizado ? 'Curso finalizado' : 'Curso reabierto' };
   }
 
   // ===============================
@@ -523,7 +532,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -564,6 +573,7 @@ ${frontendUrl}
       .select([
         'user.id', 'user.nombres', 'user.apellidos', 'user.ciudad',
         'user.empresa', 'user.cargo', 'user.rol', 'user.activo',
+        'user.correo', 'user.cedula', 'user.celular', 'user.pais',
       ])
       .where('user.id IN (:...estudianteIds)', { estudianteIds })
       .andWhere('user.activo = :activo', { activo: true })
@@ -573,6 +583,15 @@ ${frontendUrl}
   // ===============================
   // ✅ MATERIAL DIDÁCTICO (RECURSOS DEL CURSO)
   // ===============================
+  // Progreso en vivo de los envíos de material por correo (en memoria)
+  private resourceSendJobs = new Map<string, any>();
+
+  getResourceSendStatus(jobId: string) {
+    const job = this.resourceSendJobs.get(jobId);
+    if (!job) return { found: false };
+    return { found: true, ...job };
+  }
+
   private get UPLOADS_DIR() {
     return join(process.cwd(), 'uploads');
   }
@@ -682,7 +701,30 @@ ${frontendUrl}
       )
       .join('');
 
-    // 4) Encolar correos (el MailService los espacia para evitar baneos)
+    // 4) Crear job de progreso (anti-baneo según config de correo)
+    const plan = this.settings.getAutoThrottlePlan(estudiantes.length, 'email');
+    const jobId = `mat-${cursoId}-${Date.now()}`;
+    const job = {
+      jobId,
+      cursoId,
+      total: estudiantes.length,
+      enviados: 0,
+      fallidos: 0,
+      recursos: resources.length,
+      estado: 'ENVIANDO',
+      plan: {
+        delaySeg: Math.round(plan.delayMs / 1000),
+        batchSize: plan.batchSize,
+        batchPauseSeg: Math.round(plan.batchPauseMs / 1000),
+        etaSeg: Math.round(plan.etaMs / 1000),
+      },
+      startedAt: Date.now(),
+      finishedAt: null as number | null,
+    };
+    this.resourceSendJobs.set(jobId, job);
+
+    // 5) Encolar correos (el MailService los espacia para evitar baneos).
+    //    Cada correo actualiza el progreso al resolverse → seguimiento en vivo.
     for (const est of estudiantes) {
       const html = `
 <div style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto">
@@ -703,16 +745,32 @@ ${frontendUrl}
 
       this.mail
         .sendMail(est.correo, `📚 Material del curso: ${course.titulo}`, html)
-        .catch((e) => this.logger.warn(`No se pudo enviar material a ${est.correo}: ${e.message}`));
+        .then(() => {
+          job.enviados += 1;
+        })
+        .catch((e) => {
+          job.fallidos += 1;
+          this.logger.warn(`No se pudo enviar material a ${est.correo}: ${e.message}`);
+        })
+        .finally(() => {
+          if (job.enviados + job.fallidos >= job.total) {
+            job.estado = 'COMPLETADO';
+            job.finishedAt = Date.now();
+            // Limpieza del job tras 5 minutos
+            setTimeout(() => this.resourceSendJobs.delete(jobId), 5 * 60 * 1000);
+          }
+        });
     }
 
     this.logger.log(
-      `📤 Material del curso ${cursoId}: ${resources.length} enlace(s) → ${estudiantes.length} estudiante(s)`,
+      `📤 Material del curso ${cursoId}: ${resources.length} enlace(s) → ${estudiantes.length} estudiante(s) [job ${jobId}]`,
     );
     return {
       success: true,
+      jobId,
       total: estudiantes.length,
       recursos: resources.length,
+      plan: job.plan,
       message: `Enviando ${resources.length} enlace(s) a ${estudiantes.length} estudiante(s) por correo`,
     };
   }
@@ -727,7 +785,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -816,6 +874,10 @@ ${frontendUrl}
           nombres: inscripcion.estudiante.nombres,
           apellidos: inscripcion.estudiante.apellidos,
           correo: inscripcion.estudiante.correo,
+          cedula: inscripcion.estudiante.cedula,
+          celular: inscripcion.estudiante.celular,
+          pais: inscripcion.estudiante.pais,
+          ciudad: inscripcion.estudiante.ciudad,
           montoPagado: pago ? Number(pago.amount) : 0,
           metodoPago: pago ? 'Payphone' : 'Gratis',
           fechaInscripcion: inscripcion.createdAt,
@@ -836,7 +898,7 @@ ${frontendUrl}
         .select([
           'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
           'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-          'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
+          'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
           'course.createdAt', 'course.updatedAt',
           'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
         ])
@@ -864,7 +926,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId',
+        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])

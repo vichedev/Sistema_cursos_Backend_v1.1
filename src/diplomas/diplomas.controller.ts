@@ -75,4 +75,12 @@ export class DiplomasController {
     enviarDiplomasTodos(@Param('cursoId', ParseIntPipe) cursoId: number) {
         return this.diplomasService.enviarDiplomasTodos(cursoId);
     }
+
+    /** Progreso en vivo del envío masivo de diplomas. */
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles('ADMIN')
+    @Get('enviar-todos/status/:jobId')
+    enviarTodosStatus(@Param('jobId') jobId: string) {
+        return { success: true, ...this.diplomasService.getEnviarTodosStatus(jobId) };
+    }
 }

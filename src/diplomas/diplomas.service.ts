@@ -253,11 +253,20 @@ export class DiplomasService {
   }
 
   // ── Enviar diplomas a TODOS (por lotes para no saturar el SMTP) ─────────
+  // Progreso en vivo de los envíos masivos de diplomas (en memoria)
+  private enviarJobs = new Map<string, any>();
+
+  getEnviarTodosStatus(jobId: string) {
+    const job = this.enviarJobs.get(jobId);
+    if (!job) return { found: false };
+    return { found: true, ...job };
+  }
+
   async enviarDiplomasTodos(
     cursoId: number,
-  ): Promise<{ success: boolean; enviados: number; errores: number; detalle: any[] }> {
+  ): Promise<{ success: boolean; jobId: string; total: number; message: string }> {
 
-    // ── Configuración de lotes ─────────────────────────────────────────────
+    // ── Configuración de lotes (anti-baneo) ────────────────────────────────
     const LOTE_TAMANO = 3;
     const PAUSA_MS = 8000;
     const PAUSA_ENTRE = 1500;
@@ -277,84 +286,88 @@ export class DiplomasService {
       throw new BadRequestException('No hay estudiantes inscritos en este curso');
     }
 
-    let enviados = 0;
-    let errores = 0;
-    const detalle: any[] = [];
+    // ── Crear job de progreso y responder de inmediato (evita timeout 504) ──
+    const jobId = `dip-${cursoId}-${Date.now()}`;
+    const job = {
+      jobId,
+      cursoId,
+      total: inscripciones.length,
+      enviados: 0,
+      errores: 0,
+      estado: 'ENVIANDO',
+      lote: 0,
+      totalLotes: Math.ceil(inscripciones.length / LOTE_TAMANO),
+      plan: { delaySeg: PAUSA_ENTRE / 1000, batchSize: LOTE_TAMANO, batchPauseSeg: PAUSA_MS / 1000 },
+      startedAt: Date.now(),
+      finishedAt: null as number | null,
+    };
+    this.enviarJobs.set(jobId, job);
 
-    // ── Dividir en lotes ───────────────────────────────────────────────────
-    const lotes: typeof inscripciones[] = [];
+    const lotes: (typeof inscripciones)[] = [];
     for (let i = 0; i < inscripciones.length; i += LOTE_TAMANO) {
       lotes.push(inscripciones.slice(i, i + LOTE_TAMANO));
     }
 
     this.logger.log(
-      `📦 Enviando diplomas en ${lotes.length} lote(s) de ${LOTE_TAMANO} ` +
+      `📦 [job ${jobId}] Enviando diplomas en ${lotes.length} lote(s) de ${LOTE_TAMANO} ` +
       `| Total: ${inscripciones.length} | Pausa: ${PAUSA_MS / 1000}s entre lotes`
     );
 
-    for (let loteIdx = 0; loteIdx < lotes.length; loteIdx++) {
-      const lote = lotes[loteIdx];
+    // ── Proceso en SEGUNDO PLANO (no bloquea la respuesta) ──────────────────
+    (async () => {
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      try {
+        for (let loteIdx = 0; loteIdx < lotes.length; loteIdx++) {
+          const lote = lotes[loteIdx];
+          job.lote = loteIdx + 1;
 
-      this.logger.log(`📬 Procesando lote ${loteIdx + 1}/${lotes.length} (${lote.length} diplomas)`);
+          for (let i = 0; i < lote.length; i++) {
+            const inscripcion = lote[i];
+            const student = inscripcion.estudiante;
+            try {
+              const codigo = inscripcion.diplomaCodigo || this.generarCodigo(cursoId, student.id);
+              const urlPdf = `${this.backendUrl}/api/diplomas/pdf/${codigo}`;
 
-      for (let i = 0; i < lote.length; i++) {
-        const inscripcion = lote[i];
-        const student = inscripcion.estudiante;
+              await this.studentCourseRepo.update(inscripcion.id, {
+                diplomaCodigo: codigo,
+                diplomaEmitidoEn: new Date(),
+              });
 
-        try {
-          const codigo = inscripcion.diplomaCodigo || this.generarCodigo(cursoId, student.id);
-          const urlPdf = `${this.backendUrl}/api/diplomas/pdf/${codigo}`;
+              const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
+              await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
-          await this.studentCourseRepo.update(inscripcion.id, {
-            diplomaCodigo: codigo,
-            diplomaEmitidoEn: new Date(),
-          });
+              this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo, codigo, student.nombres);
+              job.enviados++;
+              this.logger.log(`✅ [Lote ${loteIdx + 1}] Diploma enviado a ${student.correo}`);
+            } catch (err: any) {
+              this.logger.warn(`⚠️  [Lote ${loteIdx + 1}] Error con ${student.correo}: ${err.message}`);
+              job.errores++;
+            }
 
-          const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
-          await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
+            if (i < lote.length - 1) await sleep(PAUSA_ENTRE);
+          }
 
-          this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo, codigo, student.nombres);
-
-          enviados++;
-          detalle.push({
-            correo: student.correo,
-            nombre: `${student.nombres} ${student.apellidos}`,
-            status: 'enviado',
-            codigo,
-            lote: loteIdx + 1,
-          });
-
-          this.logger.log(`✅ [Lote ${loteIdx + 1}] Diploma enviado a ${student.correo}`);
-
-        } catch (err) {
-          this.logger.warn(`⚠️  [Lote ${loteIdx + 1}] Error con ${student.correo}: ${err.message}`);
-          errores++;
-          detalle.push({
-            correo: student.correo,
-            nombre: `${student.nombres} ${student.apellidos}`,
-            status: 'error',
-            lote: loteIdx + 1,
-          });
+          if (loteIdx < lotes.length - 1) {
+            this.logger.log(`⏳ Pausa de ${PAUSA_MS / 1000}s antes del lote ${loteIdx + 2}...`);
+            await sleep(PAUSA_MS);
+          }
         }
-
-        // Pausa entre correos dentro del mismo lote (excepto el último del lote)
-        if (i < lote.length - 1) {
-          await new Promise(r => setTimeout(r, PAUSA_ENTRE));
-        }
+      } catch (e: any) {
+        this.logger.error(`Error en envío masivo de diplomas [job ${jobId}]: ${e.message}`);
+      } finally {
+        job.estado = 'COMPLETADO';
+        job.finishedAt = Date.now();
+        this.logger.log(`🎓 [job ${jobId}] Completado | Enviados: ${job.enviados} | Errores: ${job.errores}`);
+        setTimeout(() => this.enviarJobs.delete(jobId), 10 * 60 * 1000);
       }
+    })();
 
-      // Pausa entre lotes (excepto después del último lote)
-      if (loteIdx < lotes.length - 1) {
-        this.logger.log(
-          `⏳ Pausa de ${PAUSA_MS / 1000}s antes del lote ${loteIdx + 2}... ` +
-          `(enviados: ${enviados}, errores: ${errores})`
-        );
-        await new Promise(r => setTimeout(r, PAUSA_MS));
-      }
-    }
-
-    this.logger.log(`🎓 Proceso completado | Enviados: ${enviados} | Errores: ${errores}`);
-    return { success: true, enviados, errores, detalle };
+    return {
+      success: true,
+      jobId,
+      total: inscripciones.length,
+      message: `Enviando ${inscripciones.length} diploma(s) en segundo plano`,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

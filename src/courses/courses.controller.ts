@@ -275,6 +275,7 @@ export class CoursesController {
         fecha: course.fecha,
         hora: course.hora,
         activo: course.activo,
+        finalizado: course.finalizado ?? false,
         categoriaId: course.categoriaId ?? null,
         // ✅ SOLO INDICAR SI HAY CUPONES, SIN CONTADOR
         tieneCupones: cuponesActivos.length > 0
@@ -345,6 +346,17 @@ export class CoursesController {
     return this.coursesService.softDeleteCourse(id);
   }
 
+  /** Marca/desmarca el curso como finalizado (manual, por el admin). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Patch(':id/finalizar')
+  async finalizarCurso(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('finalizado') finalizado: boolean,
+  ) {
+    return this.coursesService.setFinalizado(id, finalizado !== false);
+  }
+
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete(':id/permanent')
@@ -392,5 +404,13 @@ export class CoursesController {
   @Post(':id/resources/send')
   async sendResources(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.coursesService.sendResources(id, body);
+  }
+
+  /** Progreso en vivo de un envío de material (anti-baneo). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/resources/send-status/:jobId')
+  async sendStatus(@Param('jobId') jobId: string) {
+    return { success: true, ...this.coursesService.getResourceSendStatus(jobId) };
   }
 }
