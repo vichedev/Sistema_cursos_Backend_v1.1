@@ -33,6 +33,10 @@ export class User {
   @Column({ nullable: true })
   pais: string;
 
+  // ✅ Foto de perfil (nombre de archivo en /uploads)
+  @Column({ type: 'varchar', nullable: true })
+  foto: string | null;
+
   @Column()
   password: string;
 

@@ -13,8 +13,13 @@ import {
   ForbiddenException, // ✅ CAMBIAR UnauthorizedException por ForbiddenException
   UsePipes,
   ValidationPipe,
-  Request
+  Request,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { join } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator'; // ✅ AGREGAR Roles decorator
@@ -23,6 +28,24 @@ import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+
+// Opciones de subida para la foto de perfil
+const avatarUploadOptions = {
+  storage: diskStorage({
+    destination: join(__dirname, '..', '..', 'uploads'),
+    filename: (_req: any, file: Express.Multer.File, cb: any) => {
+      cb(null, `avatar-${Date.now()}-${file.originalname.replace(/\s/g, '_')}`);
+    },
+  }),
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4 MB
+  fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new BadRequestException('Solo se permiten imágenes JPEG, PNG, WebP o GIF'), false);
+    }
+    cb(null, true);
+  },
+};
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -201,6 +224,8 @@ export class UsersController {
         'user.asignatura',
         'user.activo',
         'user.emailVerified',
+        'user.foto',
+        'user.pais',
         // ✅ Solo admin ve datos sensibles
         ...(req.user.rol === 'ADMIN' ? [
           'user.correo',
@@ -285,8 +310,26 @@ export class UsersController {
   }
 
   @Put('profile/me')
-  async updateMyProfile(@Body() updateData: Partial<User>, @Request() req) {
-    // ✅ ENDPOINT SEGURO PARA ACTUALIZAR EL PROPIO PERFIL
-    return this.updateUser(req.user.userId, updateData, req);
+  async updateMyProfile(@Body() updateData: any, @Request() req) {
+    // ✅ Solo se permiten campos seguros de auto-edición (no correo/usuario/cédula/rol)
+    const allowed = ['nombres', 'apellidos', 'ciudad', 'empresa', 'cargo', 'pais'];
+    const safe: any = {};
+    for (const k of allowed) {
+      if (updateData?.[k] !== undefined) safe[k] = updateData[k];
+    }
+    if (!safe.nombres && safe.nombres !== undefined && !String(safe.nombres).trim()) {
+      throw new BadRequestException('El nombre no puede estar vacío');
+    }
+    await this.usersService.update(req.user.userId, safe);
+    return this.getUserById(req.user.userId, req);
+  }
+
+  /** El usuario sube/cambia su foto de perfil. */
+  @Post('profile/avatar')
+  @UseInterceptors(FileInterceptor('foto', avatarUploadOptions))
+  async updateMyAvatar(@UploadedFile() file: Express.Multer.File, @Request() req) {
+    if (!file) throw new BadRequestException('No se recibió ninguna imagen');
+    await this.usersService.update(req.user.userId, { foto: file.filename } as Partial<User>);
+    return { success: true, foto: file.filename, message: 'Foto de perfil actualizada' };
   }
 }

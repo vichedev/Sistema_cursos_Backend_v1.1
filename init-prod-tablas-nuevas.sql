@@ -83,6 +83,9 @@ ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "categoriaId" integer;
 -- Finalización manual del curso (la decide el admin, no la fecha)
 ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "finalizado" boolean NOT NULL DEFAULT false;
 
+-- Foto de perfil del usuario
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "foto" varchar;
+
 CREATE TABLE IF NOT EXISTS "curso_recursos" (
   "id" SERIAL NOT NULL,
   "cursoId" integer NOT NULL,
