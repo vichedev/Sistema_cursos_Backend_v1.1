@@ -77,12 +77,12 @@ export class SettingsController {
   </div>
 </div>`.trim();
 
-    try {
-      await this.mail.sendMail(destino, `Contacto web: ${nombre}`, html);
-    } catch (e: any) {
-      this.logger.error(`No se pudo enviar el mensaje de contacto: ${e.message}`);
-      throw new BadRequestException('No se pudo enviar el mensaje en este momento. Inténtalo más tarde.');
-    }
+    // Envío en SEGUNDO PLANO (no bloquea la respuesta → evita timeout 504 del proxy).
+    // El correo se encola en el MailService y se envía con el ritmo anti-baneo.
+    this.mail
+      .sendMail(destino, `Contacto web: ${nombre}`, html)
+      .then(() => this.logger.log(`📨 Mensaje de contacto enviado a ${destino}`))
+      .catch((e) => this.logger.error(`No se pudo enviar el mensaje de contacto: ${e.message}`));
 
     // Confirmación al remitente (best-effort, no bloquea la respuesta).
     const confirmHtml = `
@@ -100,7 +100,7 @@ export class SettingsController {
       .sendMail(correo, 'Hemos recibido tu mensaje — MAAT Academy', confirmHtml)
       .catch((e) => this.logger.warn(`No se pudo enviar confirmación a ${correo}: ${e.message}`));
 
-    return { success: true, message: 'Mensaje enviado correctamente' };
+    return { success: true, message: 'Mensaje recibido. Se está enviando por correo.' };
   }
 
   /** Devuelve toda la configuración (secretos enmascarados) + metadatos. */
