@@ -42,6 +42,10 @@ export class Course {
   @Column({ type: 'time', nullable: true })
   hora: string;
 
+  /** Zona horaria de referencia del curso (IANA), ej: America/Guayaquil. */
+  @Column({ default: 'America/Guayaquil' })
+  zonaHoraria: string;
+
   // Relación ManyToOne hacia User (profesor) - AGREGAR onDelete
   @ManyToOne(() => User, (user) => user.cursosDictados, {
     nullable: true,

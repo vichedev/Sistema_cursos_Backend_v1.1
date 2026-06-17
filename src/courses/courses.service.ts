@@ -380,7 +380,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -398,7 +398,7 @@ ${frontendUrl}
       select: {
         id: true, titulo: true, descripcion: true, imagen: true,
         tipo: true, cupos: true, link: true, recursosLink: true,
-        precio: true, fecha: true, hora: true, activo: true, categoriaId: true, finalizado: true,
+        precio: true, fecha: true, hora: true, zonaHoraria: true, activo: true, categoriaId: true, finalizado: true,
         createdAt: true, updatedAt: true,
         profesor: { id: true, nombres: true, apellidos: true, asignatura: true },
       },
@@ -532,7 +532,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -785,7 +785,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -898,7 +898,7 @@ ${frontendUrl}
         .select([
           'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
           'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-          'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
+          'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
           'course.createdAt', 'course.updatedAt',
           'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
         ])
@@ -926,7 +926,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])

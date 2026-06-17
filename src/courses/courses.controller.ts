@@ -274,6 +274,7 @@ export class CoursesController {
         updatedAt: course.updatedAt,
         fecha: course.fecha,
         hora: course.hora,
+        zonaHoraria: course.zonaHoraria || 'America/Guayaquil',
         activo: course.activo,
         finalizado: course.finalizado ?? false,
         categoriaId: course.categoriaId ?? null,

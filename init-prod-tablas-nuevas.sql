@@ -83,6 +83,9 @@ ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "categoriaId" integer;
 -- Finalización manual del curso (la decide el admin, no la fecha)
 ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "finalizado" boolean NOT NULL DEFAULT false;
 
+-- Zona horaria de referencia del curso (IANA)
+ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "zonaHoraria" varchar NOT NULL DEFAULT 'America/Guayaquil';
+
 -- Foto de perfil del usuario
 ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "foto" varchar;
 
