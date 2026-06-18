@@ -102,6 +102,9 @@ export class AuthService {
         rol: 'ESTUDIANTE' as Rol,
         cargo: data.cargo,
         emailVerified: false,
+        // Guardamos el estado del correo detectado en el registro (valido/riesgoso)
+        emailEstado: val.estado,
+        emailValidadoEn: new Date(),
         emailVerificationToken: verificationToken,
         emailVerificationSentAt: new Date(),
       };
@@ -386,6 +389,9 @@ export class AuthService {
 
     user.emailVerified = true;
     user.emailVerificationToken = null;
+    // El buzón quedó probado: el correo es real.
+    user.emailEstado = 'valido';
+    user.emailValidadoEn = new Date();
     await this.usersService.save(user);
 
     return { message: 'Correo verificado exitosamente. Ahora puedes iniciar sesión.' };
@@ -427,6 +433,8 @@ export class AuthService {
       emailVerificationToken: null,
       emailVerificationSentAt: new Date(),
       activo: true,
+      emailEstado: 'valido',
+      emailValidadoEn: new Date(),
     });
 
     this.logger.log(`✅ Usuario ${user.correo} verificado manualmente por administrador`);
@@ -485,7 +493,14 @@ export class AuthService {
 
     await this.userRepo.update(
       { id: In(users.map((u) => u.id)) },
-      { emailVerified: true, emailVerificationToken: null, emailVerificationSentAt: new Date(), activo: true },
+      {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationSentAt: new Date(),
+        activo: true,
+        emailEstado: 'valido',
+        emailValidadoEn: new Date(),
+      },
     );
     this.logger.log(`✅ Verificación masiva: ${users.length} usuario(s) verificados por administrador`);
 

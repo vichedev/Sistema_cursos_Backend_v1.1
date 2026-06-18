@@ -29,6 +29,8 @@ import { User } from './user.entity';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EmailValidatorService } from '../common/email-validator.service';
+import { MailService } from '../common/mail.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 // Opciones de subida para la foto de perfil
 const avatarUploadOptions = {
@@ -56,6 +58,8 @@ export class UsersController {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly emailValidator: EmailValidatorService,
+    private readonly mail: MailService,
+    private readonly whatsapp: WhatsappService,
   ) { }
 
   // ===============================
@@ -403,6 +407,53 @@ export class UsersController {
       suspendidoEn: null,
     } as Partial<User>);
     return { success: true, message: 'Cuenta reactivada' };
+  }
+
+  /**
+   * Contacta al estudiante para pedirle que actualice su correo a uno válido.
+   * canal: 'email' (al correo registrado) o 'whatsapp' (vía la sesión conectada).
+   */
+  @Roles('ADMIN')
+  @Post(':id/solicitar-correo')
+  async solicitarCorreo(
+    @Param('id') id: number,
+    @Body('canal') canal: 'email' | 'whatsapp',
+  ) {
+    const user = await this.userRepository.findOne({ where: { id: Number(id) } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const nombre = `${user.nombres} ${user.apellidos}`.trim();
+    const textoWa =
+      `Hola ${user.nombres}, te escribimos de MAAT Cursos. ` +
+      `Necesitamos actualizar tu correo electrónico porque el registrado no es válido o no pudo verificarse. ` +
+      `Por favor respóndenos con un correo válido para activar/mantener tu cuenta. ¡Gracias!`;
+
+    if (canal === 'whatsapp') {
+      if (!user.celular) {
+        throw new BadRequestException('Este estudiante no tiene número de WhatsApp');
+      }
+      try {
+        await this.whatsapp.sendText(user.celular, textoWa);
+      } catch (e) {
+        throw new BadRequestException(`No se pudo enviar el WhatsApp: ${e.message}`);
+      }
+      return { success: true, message: 'Mensaje de WhatsApp enviado' };
+    }
+
+    // Email (por defecto)
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827">
+        <h2 style="color:#2563eb">Actualiza tu correo electrónico</h2>
+        <p>Hola <b>${nombre}</b>,</p>
+        <p>Detectamos que el correo registrado en tu cuenta de <b>MAAT Cursos</b> no es válido o no pudo verificarse.</p>
+        <p>Para no perder el acceso a tus cursos, por favor contáctanos y actualiza tus datos con un correo válido.</p>
+        <p style="color:#6b7280;font-size:0.9rem">Si no realizas esta actualización, tu cuenta podría ser suspendida.</p>
+      </div>`;
+    // En segundo plano (no bloquear la respuesta)
+    this.mail
+      .sendMail(user.correo, 'Actualiza tu correo — MAAT Cursos', html)
+      .catch(() => undefined);
+    return { success: true, message: 'Correo de solicitud encolado' };
   }
 
   /** El usuario sube/cambia su foto de perfil. */

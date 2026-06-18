@@ -467,12 +467,21 @@ export class CampaignsService {
   ): Promise<Array<{ userId?: number; nombre?: string; correo?: string; celular?: string }>> {
     let list: Array<{ userId?: number; nombre?: string; correo?: string; celular?: string }> = [];
 
+    // Un correo solo es "enviable" si la cuenta está correcta:
+    // verificada, no suspendida y con dominio válido. Así la publicidad por
+    // correo nunca sale a cuentas sin verificar / inválidas / suspendidas.
+    // (El celular se conserva: si tiene WhatsApp, sigue siendo alcanzable por ese canal.)
+    const correoEnviable = (u: User): string | undefined =>
+      u.emailVerified && !u.suspendido && u.emailEstado !== 'invalido'
+        ? u.correo
+        : undefined;
+
     if (campaign.segmento === 'TODOS') {
       const users = await this.userRepo.find({ where: { rol: 'ESTUDIANTE', activo: true } });
       list = users.map((u) => ({
         userId: u.id,
         nombre: `${u.nombres} ${u.apellidos}`.trim(),
-        correo: u.correo,
+        correo: correoEnviable(u),
         celular: u.celular,
       }));
     } else if (campaign.segmento === 'CURSO') {
@@ -485,7 +494,7 @@ export class CampaignsService {
         .map((sc) => ({
           userId: sc.estudiante.id,
           nombre: `${sc.estudiante.nombres} ${sc.estudiante.apellidos}`.trim(),
-          correo: sc.estudiante.correo,
+          correo: correoEnviable(sc.estudiante),
           celular: sc.estudiante.celular,
         }));
     } else if (campaign.segmento === 'MANUAL') {

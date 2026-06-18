@@ -327,6 +327,7 @@ export class UsersService {
         emailValidadoEn: true,
         suspendido: true,
         motivoSuspension: true,
+        emailVerificationSentAt: true,
       }
     });
 
