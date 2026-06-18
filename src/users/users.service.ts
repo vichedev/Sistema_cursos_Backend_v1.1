@@ -323,6 +323,10 @@ export class UsersService {
         rol: true,
         activo: true,
         emailVerified: true,
+        emailEstado: true,
+        emailValidadoEn: true,
+        suspendido: true,
+        motivoSuspension: true,
       }
     });
 
@@ -345,6 +349,8 @@ export class UsersService {
         rol: true,
         activo: true,
         emailVerified: true,
+        emailEstado: true,
+        emailValidadoEn: true,
       }
     });
 

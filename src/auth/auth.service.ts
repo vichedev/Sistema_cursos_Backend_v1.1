@@ -16,6 +16,7 @@ import { AccessLog } from './access-log.entity';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { MailQueueService } from '../common/mail-queue.service';
 import { MailService } from '../common/mail.service';
+import { EmailValidatorService } from '../common/email-validator.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -31,6 +32,7 @@ export class AuthService {
     @InjectRepository(AccessLog) private accessLogRepo: Repository<AccessLog>,
     private mailService: MailService,
     private whatsappService: WhatsappService,
+    private emailValidator: EmailValidatorService,
   ) { }
 
   /** Registra (en segundo plano) un intento de acceso para monitoreo. */
@@ -73,6 +75,15 @@ export class AuthService {
 
       if (await this.usersService.findByUsuario(data.usuario)) {
         throw new BadRequestException('Usuario ya existe');
+      }
+      // ✅ Validar que el correo sea real (sintaxis + dominio con servidor de correo)
+      const val = await this.emailValidator.validate(data.correo, { smtp: false });
+      if (val.estado === 'invalido') {
+        throw new BadRequestException(
+          val.sugerencia
+            ? `Correo no válido: ${val.razon}`
+            : `Correo no válido: ${val.razon}. Usa un correo real al que tengas acceso.`,
+        );
       }
       if (await this.usersService.findByCorreo(data.correo)) {
         throw new BadRequestException('Correo ya existe');
@@ -145,6 +156,15 @@ export class AuthService {
     if (!isPasswordValid) {
       this.recordAccess({ ...userInfo, exito: false, motivo: 'Contraseña incorrecta' });
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    }
+
+    if (user.suspendido) {
+      this.recordAccess({ ...userInfo, exito: false, motivo: 'Cuenta suspendida' });
+      throw new ForbiddenException(
+        user.motivoSuspension
+          ? `Cuenta suspendida: ${user.motivoSuspension}. Contacta a soporte para revalidar tus datos y reactivarla.`
+          : 'Tu cuenta está suspendida. Contacta a soporte para revalidar tus datos y reactivarla.',
+      );
     }
 
     if (!user.emailVerified) {

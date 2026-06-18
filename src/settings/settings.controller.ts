@@ -12,6 +12,7 @@ import {
 import { SettingsService, AI_PROVIDERS } from './settings.service';
 import { MailService } from '../common/mail.service';
 import { AIService } from '../common/ai.service';
+import { EmailValidatorService } from '../common/email-validator.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -27,6 +28,7 @@ export class SettingsController {
     private settings: SettingsService,
     private mail: MailService,
     private ai: AIService,
+    private emailValidator: EmailValidatorService,
   ) {}
 
   /** PÚBLICO: datos de contacto que muestra la landing. */
@@ -52,6 +54,11 @@ export class SettingsController {
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
       throw new BadRequestException('El correo no es válido');
+    }
+    // Verifica que el correo del remitente tenga un dominio real (para poder responderle)
+    const val = await this.emailValidator.validate(correo, { smtp: false });
+    if (val.estado === 'invalido') {
+      throw new BadRequestException(`Correo no válido: ${val.razon}`);
     }
 
     const destino = this.settings.getContactDestino();

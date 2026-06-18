@@ -58,6 +58,26 @@ export class User {
   @Column({ default: false })
   emailVerified: boolean;
 
+  /** Resultado de la validación de existencia del correo: valido | riesgoso | invalido. */
+  @Column({ type: 'varchar', nullable: true })
+  emailEstado: string | null;
+
+  /** Fecha de la última validación del correo. */
+  @Column({ type: 'timestamp', nullable: true })
+  emailValidadoEn: Date | null;
+
+  /** Cuenta suspendida: no puede iniciar sesión hasta que soporte la reactive. */
+  @Column({ default: false })
+  suspendido: boolean;
+
+  /** Motivo de la suspensión (se muestra al usuario al intentar entrar). */
+  @Column({ type: 'varchar', nullable: true })
+  motivoSuspension: string | null;
+
+  /** Fecha de la suspensión. */
+  @Column({ type: 'timestamp', nullable: true })
+  suspendidoEn: Date | null;
+
   @Column({ type: 'varchar', nullable: true })
   emailVerificationToken?: string | null;
 

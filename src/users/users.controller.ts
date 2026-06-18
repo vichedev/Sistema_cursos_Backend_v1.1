@@ -28,6 +28,7 @@ import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { EmailValidatorService } from '../common/email-validator.service';
 
 // Opciones de subida para la foto de perfil
 const avatarUploadOptions = {
@@ -54,6 +55,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly emailValidator: EmailValidatorService,
   ) { }
 
   // ===============================
@@ -322,6 +324,85 @@ export class UsersController {
     }
     await this.usersService.update(req.user.userId, safe);
     return this.getUserById(req.user.userId, req);
+  }
+
+  // ===============================
+  // ✅ VALIDACIÓN DE CORREOS (¿el correo existe?)
+  // ===============================
+
+  /** Valida un correo puntual (sintaxis + dominio MX + sondeo SMTP). No guarda nada. */
+  @Roles('ADMIN')
+  @Post('validate-email')
+  async validateEmail(@Body('email') email: string) {
+    if (!email) throw new BadRequestException('Correo requerido');
+    return { success: true, data: await this.emailValidator.validate(email, { smtp: true }) };
+  }
+
+  /** Valida en lote los correos de varios usuarios (por ids) y guarda el resultado. */
+  @Roles('ADMIN')
+  @Post('validate-emails-bulk')
+  async validateEmailsBulk(@Body('ids') ids: number[]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('Lista de ids requerida');
+    }
+    const resumen: Record<string, number> = { valido: 0, riesgoso: 0, invalido: 0 };
+    for (const rawId of ids.slice(0, 500)) {
+      const id = Number(rawId);
+      const user = await this.userRepository.findOne({ where: { id } });
+      if (!user) continue;
+      const r = await this.emailValidator.validate(user.correo, { smtp: true });
+      await this.usersService.update(id, {
+        emailEstado: r.estado,
+        emailValidadoEn: new Date(),
+      } as Partial<User>);
+      resumen[r.estado] = (resumen[r.estado] || 0) + 1;
+    }
+    return { success: true, resumen };
+  }
+
+  /** Valida el correo de un usuario y guarda el resultado (estado real del correo). */
+  @Roles('ADMIN')
+  @Post(':id/validate-email')
+  async validateUserEmail(@Param('id') id: number, @Request() req) {
+    this.validateOwnership(req.user, Number(id));
+    const user = await this.userRepository.findOne({ where: { id: Number(id) } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const result = await this.emailValidator.validate(user.correo, { smtp: true });
+    await this.usersService.update(Number(id), {
+      emailEstado: result.estado,
+      emailValidadoEn: new Date(),
+    } as Partial<User>);
+    return { success: true, data: result };
+  }
+
+  /** Suspende la cuenta de un usuario (no podrá iniciar sesión hasta reactivarla). */
+  @Roles('ADMIN')
+  @Post(':id/suspender')
+  async suspenderUsuario(@Param('id') id: number, @Body('motivo') motivo: string) {
+    const user = await this.userRepository.findOne({ where: { id: Number(id) } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.id === 1) throw new BadRequestException('No se puede suspender al administrador principal');
+    await this.usersService.update(Number(id), {
+      suspendido: true,
+      motivoSuspension: (motivo || 'Datos pendientes de revalidación').trim().slice(0, 200),
+      suspendidoEn: new Date(),
+    } as Partial<User>);
+    return { success: true, message: 'Cuenta suspendida' };
+  }
+
+  /** Reactiva la cuenta de un usuario suspendido. */
+  @Roles('ADMIN')
+  @Post(':id/reactivar')
+  async reactivarUsuario(@Param('id') id: number) {
+    const user = await this.userRepository.findOne({ where: { id: Number(id) } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    await this.usersService.update(Number(id), {
+      suspendido: false,
+      motivoSuspension: null,
+      suspendidoEn: null,
+    } as Partial<User>);
+    return { success: true, message: 'Cuenta reactivada' };
   }
 
   /** El usuario sube/cambia su foto de perfil. */

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
+import { EmailValidatorService } from '../common/email-validator.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -24,7 +25,18 @@ const COOKIE_OPTIONS = {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(
+    private authService: AuthService,
+    private emailValidator: EmailValidatorService,
+  ) { }
+
+  /** PÚBLICO: validación en vivo del correo en el formulario de registro. */
+  @Public()
+  @Post('check-email')
+  async checkEmail(@Body('correo') correo: string) {
+    const data = await this.emailValidator.validate(correo || '', { smtp: false });
+    return { success: true, data };
+  }
 
   @Post('register')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))

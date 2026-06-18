@@ -89,6 +89,15 @@ ALTER TABLE "cursos" ADD COLUMN IF NOT EXISTS "zonaHoraria" varchar NOT NULL DEF
 -- Foto de perfil del usuario
 ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "foto" varchar;
 
+-- Validación de existencia del correo (valido | riesgoso | invalido)
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "emailEstado" varchar;
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "emailValidadoEn" timestamp;
+
+-- Suspensión de cuenta (bloquea login hasta revalidar con soporte)
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "suspendido" boolean NOT NULL DEFAULT false;
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "motivoSuspension" varchar;
+ALTER TABLE "usuarios" ADD COLUMN IF NOT EXISTS "suspendidoEn" timestamp;
+
 CREATE TABLE IF NOT EXISTS "curso_recursos" (
   "id" SERIAL NOT NULL,
   "cursoId" integer NOT NULL,
