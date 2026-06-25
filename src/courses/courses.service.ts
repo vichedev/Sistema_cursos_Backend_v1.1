@@ -236,11 +236,20 @@ export class CoursesService {
         return;
       }
 
-      const estudiantes = await this.userRepo.find({ where: { rol: 'ESTUDIANTE' } });
+      const todos = await this.userRepo.find({ where: { rol: 'ESTUDIANTE', activo: true } });
+      // Elegibilidad por canal: nunca se notifica a suspendidos.
+      // Correo: solo a cuentas verificadas y con correo no inválido.
+      // WhatsApp: a quien tenga celular.
+      const puedeCorreo = (e: User) =>
+        correo && !!e.correo && e.emailVerified && !e.suspendido && e.emailEstado !== 'invalido';
+      const puedeWhats = (e: User) => whatsapp && !!e.celular && !e.suspendido;
+      const estudiantes = todos.filter((e) => puedeCorreo(e) || puedeWhats(e));
       const total = estudiantes.length;
 
       this.sse.emitStart(courseId, course.titulo, total);
-      this.logger.log(`📢 Programando notificaciones para ${total} estudiantes`);
+      this.logger.log(
+        `📢 Programando notificaciones para ${total} estudiantes (excluidos suspendidos / sin verificar / correo inválido)`,
+      );
 
       if (total === 0) {
         this.sse.emitDone(courseId);
@@ -269,23 +278,24 @@ export class CoursesService {
         setTimeout(async () => {
           this.logger.log(`⏰ Procesando lote ${batchIndex + 1} de ${totalBatches}`);
 
-          // ✅ CORREOS en paralelo — todos los del lote a la vez
+          // ✅ CORREOS en paralelo — solo a destinatarios elegibles
           if (correo) {
+            const conCorreo = batch.filter((est) => puedeCorreo(est));
             const resultadosCorreo = await Promise.allSettled(
-              batch.map((est) => this.sendEmailNotification(est, course)),
+              conCorreo.map((est) => this.sendEmailNotification(est, course)),
             );
             resultadosCorreo.forEach((result, idx) => {
               if (result.status === 'fulfilled') {
-                this.logger.log(`📧 Correo enviado a ${batch[idx].correo}`);
+                this.logger.log(`📧 Correo enviado a ${conCorreo[idx].correo}`);
               } else {
-                this.logger.error(`❌ Error correo a ${batch[idx].correo}: ${result.reason?.message}`);
+                this.logger.error(`❌ Error correo a ${conCorreo[idx].correo}: ${result.reason?.message}`);
               }
             });
           }
 
-          // ✅ WHATSAPP en paralelo — solo los que tienen celular
+          // ✅ WHATSAPP en paralelo — solo elegibles con celular
           if (whatsapp) {
-            const conCelular = batch.filter((est) => est.celular);
+            const conCelular = batch.filter((est) => puedeWhats(est));
             const resultadosWA = await Promise.allSettled(
               conCelular.map((est) => this.sendWhatsAppNotification(est, course)),
             );
