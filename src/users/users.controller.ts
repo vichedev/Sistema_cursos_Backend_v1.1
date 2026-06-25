@@ -125,6 +125,10 @@ export class UsersController {
         cedula: user.cedula,
         celular: user.celular,
         emailVerified: user.emailVerified,
+        emailEstado: user.emailEstado,
+        emailValidadoEn: user.emailValidadoEn,
+        suspendido: user.suspendido,
+        motivoSuspension: user.motivoSuspension,
         emailVerificationSentAt: user.emailVerificationSentAt,
         emailVerificationToken: user.emailVerificationToken,
         activo: user.activo,
@@ -387,11 +391,35 @@ export class UsersController {
     const user = await this.userRepository.findOne({ where: { id: Number(id) } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
     if (user.id === 1) throw new BadRequestException('No se puede suspender al administrador principal');
+
+    const motivoFinal = (motivo || 'Falta de verificación de correo').trim().slice(0, 200);
     await this.usersService.update(Number(id), {
       suspendido: true,
-      motivoSuspension: (motivo || 'Datos pendientes de revalidación').trim().slice(0, 200),
+      motivoSuspension: motivoFinal,
       suspendidoEn: new Date(),
     } as Partial<User>);
+
+    // Correo de aviso de suspensión (en segundo plano, no bloquea la respuesta)
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827">
+        <div style="background:#f59e0b;color:#fff;padding:18px 24px;border-radius:12px 12px 0 0">
+          <h2 style="margin:0;font-size:20px">⚠️ Tu cuenta ha sido suspendida</h2>
+        </div>
+        <div style="border:1px solid #fde68a;border-top:none;padding:20px 24px;border-radius:0 0 12px 12px">
+          <p>Hola <b>${user.nombres} ${user.apellidos}</b>,</p>
+          <p>Tu cuenta en <b>MAAT Cursos</b> ha sido <b>suspendida temporalmente</b> por el siguiente motivo:</p>
+          <p style="background:#fffbeb;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:6px;margin:14px 0">
+            ${motivoFinal}
+          </p>
+          <p>Mientras tu cuenta esté suspendida <b>no podrás iniciar sesión</b>. Para reactivarla, por favor
+            <b>contáctate con soporte</b> y valida tus datos (especialmente un correo electrónico válido).</p>
+          <p style="color:#6b7280;font-size:0.9rem;margin-top:16px">Si crees que esto es un error, responde a este correo o escríbenos por nuestros canales de soporte.</p>
+        </div>
+      </div>`;
+    this.mail
+      .sendMail(user.correo, 'Cuenta suspendida — MAAT Cursos', html)
+      .catch(() => undefined);
+
     return { success: true, message: 'Cuenta suspendida' };
   }
 

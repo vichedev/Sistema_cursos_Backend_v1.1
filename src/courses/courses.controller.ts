@@ -158,6 +158,16 @@ export class CoursesController {
     });
   }
 
+  /** Reenvía las notificaciones de "nuevo curso" a los estudiantes (correo/WhatsApp). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/notificar')
+  async reenviarNotificaciones(@Param('id', ParseIntPipe) id: number, @Body() body) {
+    const correo = body?.notificarCorreo === true || body?.notificarCorreo === 'true';
+    const whatsapp = body?.notificarWhatsapp === true || body?.notificarWhatsapp === 'true';
+    return this.coursesService.reenviarNotificaciones(id, correo, whatsapp);
+  }
+
   @Roles('ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Put(':id')

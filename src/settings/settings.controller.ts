@@ -162,4 +162,11 @@ export class SettingsController {
     }
     return result;
   }
+
+  /** Estado rápido de la conexión SMTP con la configuración actual. */
+  @Get('smtp-status')
+  async smtpStatus() {
+    const ok = await this.mail.verifyConnection();
+    return { ok };
+  }
 }

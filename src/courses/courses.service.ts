@@ -197,6 +197,33 @@ export class CoursesService {
   // ===============================
   // ✅ NOTIFICAR EN SEGUNDO PLANO — lotes paralelos
   // ===============================
+  /**
+   * Reenvía las notificaciones de "nuevo curso" a todos los estudiantes.
+   * Verifica primero el SMTP (si se pide correo) para avisar al admin si las
+   * credenciales fallan. El envío real va en segundo plano (anti-baneo + SSE).
+   */
+  async reenviarNotificaciones(courseId: number, correo: boolean, whatsapp: boolean) {
+    const course = await this.findById(courseId);
+    if (!course) {
+      throw new BadRequestException('Curso no encontrado');
+    }
+    if (!correo && !whatsapp) {
+      throw new BadRequestException('Selecciona al menos un canal (correo o WhatsApp)');
+    }
+    const smtpOk = correo ? await this.mail.verifyConnection() : true;
+    this.notifyAllStudentsBackground(courseId, correo, whatsapp).catch((err) =>
+      this.logger.error(`Error reenviando notificaciones: ${err.message}`),
+    );
+    return {
+      success: true,
+      smtpOk,
+      titulo: course.titulo,
+      message: smtpOk
+        ? 'Notificaciones en cola de envío'
+        : 'SMTP no disponible: revisa las credenciales en Configuración. Los correos no saldrán hasta corregirlo.',
+    };
+  }
+
   private async notifyAllStudentsBackground(
     courseId: number,
     correo: boolean,

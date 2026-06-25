@@ -4,7 +4,6 @@ import { User, Rol } from './user.entity';
 import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
-import { StudentCourse } from '../courses/student-course.entity';
 
 @Injectable()
 export class UsersService {
@@ -304,100 +303,4 @@ export class UsersService {
     return duplicates;
   }
 
-  async getUsuariosPorRolCompleto() {
-    // Obtener estudiantes con sus datos completos (sin cursos)
-    const estudiantes = await this.repo.find({
-      where: { rol: 'ESTUDIANTE', activo: true },
-      select: {
-        id: true,
-        cedula: true,
-        nombres: true,
-        apellidos: true,
-        correo: true,
-        celular: true,
-        pais: true, // ✅ INCLUIR PAÍS
-        ciudad: true,
-        empresa: true,
-        cargo: true,
-        usuario: true,
-        rol: true,
-        activo: true,
-        emailVerified: true,
-        emailEstado: true,
-        emailValidadoEn: true,
-        suspendido: true,
-        motivoSuspension: true,
-        emailVerificationSentAt: true,
-      }
-    });
-
-    // Obtener administradores
-    const administradores = await this.repo.find({
-      where: { rol: In(['ADMIN', 'PROFESOR']), activo: true },
-      select: {
-        id: true,
-        cedula: true,
-        nombres: true,
-        apellidos: true,
-        correo: true,
-        celular: true,
-        pais: true, // ✅ INCLUIR PAÍS
-        ciudad: true,
-        empresa: true,
-        cargo: true,
-        usuario: true,
-        asignatura: true,
-        rol: true,
-        activo: true,
-        emailVerified: true,
-        emailEstado: true,
-        emailValidadoEn: true,
-      }
-    });
-
-    const estudiantesConCursos = await Promise.all(
-      estudiantes.map(async (estudiante) => {
-        try {
-          const studentCourses = await this.repo.manager
-            .getRepository(StudentCourse)
-            .find({
-              where: { estudianteId: estudiante.id },
-              relations: ['curso']
-            });
-
-          const cursos = studentCourses
-            .filter(sc => sc.curso && sc.curso.activo)
-            .map(sc => ({
-              id: sc.curso.id,
-              titulo: sc.curso.titulo,
-              descripcion: sc.curso.descripcion,
-              imagen: sc.curso.imagen,
-              tipo: sc.curso.tipo,
-              cupos: sc.curso.cupos,
-              link: sc.curso.link,
-              precio: sc.curso.precio,
-              fecha: sc.curso.fecha,
-              hora: sc.curso.hora,
-              activo: sc.curso.activo,
-            }));
-
-          return {
-            ...estudiante,
-            cursos: cursos || []
-          };
-        } catch (error) {
-          console.error(`❌ Error obteniendo cursos para estudiante ${estudiante.id}:`, error);
-          return {
-            ...estudiante,
-            cursos: []
-          };
-        }
-      })
-    );
-
-    return {
-      estudiantes: estudiantesConCursos,
-      administradores
-    };
-  }
 }
