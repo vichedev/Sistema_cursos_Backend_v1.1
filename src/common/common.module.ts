@@ -8,6 +8,7 @@ import { MailQueueService } from './mail-queue.service';
 import { AIService } from './ai.service';
 import { TasksService } from './tasks.service';
 import { EmailValidatorService } from './email-validator.service';
+import { TldService } from './tld.service';
 import { CouponsModule } from '../coupons/coupons.module';
 
 @Global()
@@ -19,12 +20,14 @@ import { CouponsModule } from '../coupons/coupons.module';
     AIService,
     TasksService,
     EmailValidatorService,
+    TldService,
   ],
   exports: [
     MailService,
     MailQueueService,
     AIService,
     EmailValidatorService,
+    TldService,
   ],
 })
 export class CommonModule {}

@@ -4,6 +4,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as dns from 'dns';
 import * as net from 'net';
+import { TldService } from './tld.service';
 
 const resolveMx = dns.promises.resolveMx;
 
@@ -25,6 +26,8 @@ export interface EmailValidation {
 @Injectable()
 export class EmailValidatorService {
   private readonly logger = new Logger(EmailValidatorService.name);
+
+  constructor(private readonly tld: TldService) {}
 
   // Dominios temporales/desechables comunes (no se permiten)
   private readonly disposable = new Set([
@@ -76,6 +79,15 @@ export class EmailValidatorService {
     res.sintaxis = true;
     const dominio = e.split('@')[1];
     res.dominio = dominio;
+
+    // La extensión del dominio (TLD) debe existir en la lista oficial de IANA.
+    // Esto bloquea cosas como "@correo.con" o TLDs inventados, de forma profesional.
+    if (!this.tld.isValidTld(dominio)) {
+      res.estado = 'invalido';
+      const tld = dominio.split('.').pop();
+      res.razon = `La extensión del dominio (.${tld}) no existe. Revisa el correo`;
+      return res;
+    }
 
     if (this.typos[dominio]) {
       res.estado = 'invalido';
@@ -129,12 +141,15 @@ export class EmailValidatorService {
     } else if (res.smtp === 'valido') {
       res.estado = 'valido';
       res.razon = 'Correo válido y existente';
+    } else if (res.smtp === 'omitido') {
+      // TLD real (IANA) + dominio con servidor de correo (MX) → correo válido.
+      // No se sondeó el buzón (no es fiable), pero el dominio es entregable.
+      res.estado = 'valido';
+      res.razon = 'Dominio válido con servidor de correo';
     } else {
+      // Se intentó el sondeo SMTP pero fue inconcluso (puerto bloqueado, greylist…)
       res.estado = 'riesgoso';
-      res.razon =
-        res.smtp === 'omitido'
-          ? 'Dominio con servidor de correo válido (no se sondeó el buzón)'
-          : 'Dominio válido, pero el servidor no confirmó la existencia del buzón';
+      res.razon = 'Dominio válido, pero el servidor no confirmó la existencia del buzón';
     }
 
     return res;
