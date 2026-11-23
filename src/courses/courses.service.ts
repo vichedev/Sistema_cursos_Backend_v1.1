@@ -7,6 +7,7 @@ import { existsSync, unlinkSync } from 'fs';
 import { Course } from './course.entity';
 import { CourseResource } from './course-resource.entity';
 import { StudentCourse } from './student-course.entity';
+import { CourseAssignment } from './course-assignment.entity';
 import { PaymentAttempt } from '../payments/payment-attempt.entity';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../common/mail.service';
@@ -31,6 +32,8 @@ export class CoursesService {
     @InjectRepository(PaymentAttempt)
     private paymentAttemptRepo: Repository<PaymentAttempt>,
     @InjectRepository(User) private userRepo: Repository<User>,
+    @InjectRepository(CourseAssignment)
+    private asignacionRepo: Repository<CourseAssignment>,
     private usersService: UsersService,
     private mail: MailService,
     private readonly sse: NotificationsSseService,
@@ -86,6 +89,12 @@ export class CoursesService {
         this.logger.error('Error parseando cupones:', error);
       }
     }
+
+    // Curso privado: llega como "true"/"false" (multipart) o boolean.
+    data.privado = data.privado === true || data.privado === 'true';
+    const esPrivado: boolean = data.privado;
+    // En un curso privado no existen cupos: el acceso lo decide el admin al asignar.
+    if (esPrivado) data.cupos = 0;
 
     const course = this.repo.create(data);
     const result = await this.repo.save(course);
@@ -145,7 +154,9 @@ export class CoursesService {
     const notificarWhatsapp =
       data.notificarWhatsapp === 'true' || data.notificarWhatsapp === true;
 
-    if (notificarCorreo || notificarWhatsapp) {
+    // Curso PRIVADO: no se anuncia a todos. Se notifica a cada estudiante al
+    // asignarlo (POST /courses/:id/asignados).
+    if (!esPrivado && (notificarCorreo || notificarWhatsapp)) {
       this.notifyAllStudentsBackground(courseId, notificarCorreo, notificarWhatsapp).catch(
         (err) => this.logger.error(`Error en notificación en segundo plano: ${err.message}`),
       );
@@ -153,14 +164,17 @@ export class CoursesService {
 
     const createdCourse = await this.findById(courseId);
 
-    // Notificar a estudiantes conectados sobre el nuevo curso via SSE
-    this.sse.emitNewCourse(
-      courseId,
-      data.titulo,
-      data.tipo,
-      parseFloat(String(data.precio || 0)),
-      data.imagen || null,
-    );
+    // Notificar a estudiantes conectados sobre el nuevo curso via SSE.
+    // SEGURIDAD: el stream SSE es público → nunca se emite para cursos privados.
+    if (!esPrivado) {
+      this.sse.emitNewCourse(
+        courseId,
+        data.titulo,
+        data.tipo,
+        parseFloat(String(data.precio || 0)),
+        data.imagen || null,
+      );
+    }
 
     return createdCourse;
   }
@@ -198,7 +212,8 @@ export class CoursesService {
   // ✅ NOTIFICAR EN SEGUNDO PLANO — lotes paralelos
   // ===============================
   /**
-   * Reenvía las notificaciones de "nuevo curso" a todos los estudiantes.
+   * Reenvía las notificaciones de "nuevo curso" a todos los estudiantes
+   * (si el curso es PRIVADO, solo a los estudiantes asignados).
    * Verifica primero el SMTP (si se pide correo) para avisar al admin si las
    * credenciales fallan. El envío real va en segundo plano (anti-baneo + SSE).
    */
@@ -236,7 +251,16 @@ export class CoursesService {
         return;
       }
 
-      const todos = await this.userRepo.find({ where: { rol: 'ESTUDIANTE', activo: true } });
+      // Curso PRIVADO → solo los estudiantes asignados. Público → todos.
+      const esPrivado = !!course.privado;
+      const todos = await this.destinatariosBaseDeCurso(course);
+      // SEGURIDAD: el stream SSE es público (lleva el título del curso) → en
+      // cursos privados no se emite progreso por SSE.
+      const sse = {
+        start: (t: number) => { if (!esPrivado) this.sse.emitStart(courseId, course.titulo, t); },
+        progress: (c: number, t: number) => { if (!esPrivado) this.sse.emitProgress(courseId, c, t); },
+        done: () => { if (!esPrivado) this.sse.emitDone(courseId); },
+      };
       // Elegibilidad por canal: nunca se notifica a suspendidos.
       // Correo: solo a cuentas verificadas y con correo no inválido.
       // WhatsApp: a quien tenga celular.
@@ -246,13 +270,13 @@ export class CoursesService {
       const estudiantes = todos.filter((e) => puedeCorreo(e) || puedeWhats(e));
       const total = estudiantes.length;
 
-      this.sse.emitStart(courseId, course.titulo, total);
+      sse.start(total);
       this.logger.log(
         `📢 Programando notificaciones para ${total} estudiantes (excluidos suspendidos / sin verificar / correo inválido)`,
       );
 
       if (total === 0) {
-        this.sse.emitDone(courseId);
+        sse.done();
         this.logger.log(`✅ Notificaciones (0) completadas para el curso: ${course.titulo}`);
         return;
       }
@@ -310,10 +334,10 @@ export class CoursesService {
 
           // ✅ PROGRESO: actualizar después de procesar todo el lote
           completed = Math.min(completed + batch.length, total);
-          this.sse.emitProgress(courseId, completed, total);
+          sse.progress(completed, total);
 
           if (completed >= total) {
-            this.sse.emitDone(courseId);
+            sse.done();
             this.logger.log(`✅ Notificaciones completadas para el curso: ${course.titulo}`);
           }
         }, batchIndex * delayBetweenBatches);
@@ -410,19 +434,39 @@ ${frontendUrl}
   // ===============================
   // ✅ FIND ALL (público, activos)
   // ===============================
-  findAll() {
-    return this.repo
+  /** Nº de estudiantes asignados por curso (para mostrarlo en el panel admin). */
+  async contarAsignados(cursoIds: number[]): Promise<Map<number, number>> {
+    const mapa = new Map<number, number>();
+    if (!cursoIds.length) return mapa;
+    const filas = await this.asignacionRepo
+      .createQueryBuilder('a')
+      .select('a.cursoId', 'cursoId')
+      .addSelect('COUNT(*)', 'total')
+      .where('a.cursoId IN (:...cursoIds)', { cursoIds })
+      .groupBy('a.cursoId')
+      .getRawMany();
+    for (const f of filas) mapa.set(Number(f.cursoId), Number(f.total));
+    return mapa;
+  }
+
+  findAll(opts: { incluirPrivados?: boolean } = {}) {
+    const qb = this.repo
       .createQueryBuilder('course')
       .leftJoinAndSelect('course.profesor', 'profesor')
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado', 'course.privado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
-      .where('course.activo = :activo', { activo: true })
-      .getMany();
+      .where('course.activo = :activo', { activo: true });
+    // SEGURIDAD: los cursos privados jamás salen en el listado público (landing).
+    // Solo el ADMIN autenticado (verificado en el controller) los ve.
+    if (!opts.incluirPrivados) {
+      qb.andWhere('course.privado = :privado', { privado: false });
+    }
+    return qb.getMany();
   }
 
   // ===============================
@@ -435,7 +479,7 @@ ${frontendUrl}
       select: {
         id: true, titulo: true, descripcion: true, imagen: true,
         tipo: true, cupos: true, link: true, recursosLink: true,
-        precio: true, fecha: true, hora: true, zonaHoraria: true, activo: true, categoriaId: true, finalizado: true,
+        precio: true, fecha: true, hora: true, zonaHoraria: true, activo: true, categoriaId: true, finalizado: true, privado: true,
         createdAt: true, updatedAt: true,
         profesor: { id: true, nombres: true, apellidos: true, asignatura: true },
       },
@@ -462,6 +506,10 @@ ${frontendUrl}
   async update(id: number, data: Partial<Course>) {
     const course = await this.findById(id);
     if (!course) throw new NotFoundException('Curso no encontrado');
+
+    // En un curso privado no existen cupos: el acceso lo decide el admin al asignar.
+    const quedaraPrivado = data.privado !== undefined ? !!data.privado : !!course.privado;
+    if (quedaraPrivado) data.cupos = 0;
 
     if (data.fecha) {
       data.fecha = this.formatDateOnly(data.fecha);
@@ -569,7 +617,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado', 'course.privado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -822,7 +870,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado', 'course.privado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -837,6 +885,17 @@ ${frontendUrl}
     const inscritosIds = inscritos.map((x) => x.cursoId);
     const cursosPagadosIds = pagosAprobados.map((p) => p.cursoId);
 
+    // SEGURIDAD: un curso privado solo aparece si el estudiante está asignado
+    // o ya está inscrito en él.
+    const asignaciones = await this.asignacionRepo.find({
+      where: { estudianteId: userId },
+      select: { cursoId: true },
+    });
+    const asignadosIds = new Set(asignaciones.map((a) => a.cursoId));
+    const cursosVisibles = cursos.filter(
+      (c) => !c.privado || asignadosIds.has(c.id) || inscritosIds.includes(c.id),
+    );
+
     // Consulta separada para cupones (no se expone al frontend)
     const cursosConCupones = await this.repo
       .createQueryBuilder('course')
@@ -848,7 +907,7 @@ ${frontendUrl}
       .where('course.activo = :activo', { activo: true })
       .getMany();
 
-    return cursos.map((curso) => {
+    return cursosVisibles.map((curso) => {
       const estaInscrito = inscritosIds.includes(curso.id);
       const haPagado = cursosPagadosIds.includes(curso.id);
 
@@ -935,7 +994,7 @@ ${frontendUrl}
         .select([
           'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
           'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-          'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
+          'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado', 'course.privado',
           'course.createdAt', 'course.updatedAt',
           'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
         ])
@@ -963,7 +1022,7 @@ ${frontendUrl}
       .select([
         'course.id', 'course.titulo', 'course.descripcion', 'course.imagen',
         'course.tipo', 'course.cupos', 'course.link', 'course.recursosLink',
-        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado',
+        'course.precio', 'course.fecha', 'course.hora', 'course.zonaHoraria', 'course.activo', 'course.categoriaId', 'course.finalizado', 'course.privado',
         'course.createdAt', 'course.updatedAt',
         'profesor.id', 'profesor.nombres', 'profesor.apellidos', 'profesor.asignatura',
       ])
@@ -1056,5 +1115,355 @@ ${frontendUrl}
       this.logger.error(`❌ Error eliminando curso ${id} permanentemente:`, error);
       return { success: false, message: 'Error interno del servidor al eliminar el curso' };
     }
+  }
+
+  // ===========================================================================
+  // ✅ CURSOS PRIVADOS — asignación de estudiantes
+  // ===========================================================================
+
+  /** Curso gratuito: tipo *_GRATIS o precio 0 (misma regla que inscribir-gratis). */
+  private esCursoGratis(course: { tipo?: any; precio?: any }): boolean {
+    return String(course.tipo || '').endsWith('_GRATIS') || Number(course.precio) === 0;
+  }
+
+  /** ¿El estudiante está asignado a este curso (privado)? */
+  async estaAsignado(cursoId: number, estudianteId: number): Promise<boolean> {
+    const c = Number(cursoId);
+    const e = Number(estudianteId);
+    if (!Number.isInteger(c) || !Number.isInteger(e)) return false;
+    const n = await this.asignacionRepo.count({ where: { cursoId: c, estudianteId: e } });
+    return n > 0;
+  }
+
+  /**
+   * Universo de destinatarios de las notificaciones de un curso:
+   *  - curso público  → todos los estudiantes activos;
+   *  - curso PRIVADO  → únicamente los estudiantes asignados.
+   * (La elegibilidad por canal se aplica después.)
+   */
+  private async destinatariosBaseDeCurso(course: { id: number; privado?: boolean }): Promise<User[]> {
+    if (!course.privado) {
+      return this.userRepo.find({ where: { rol: 'ESTUDIANTE', activo: true } });
+    }
+    const asignaciones = await this.asignacionRepo.find({
+      where: { cursoId: course.id },
+      select: { id: true, estudianteId: true },
+    });
+    const ids = asignaciones.map((a) => a.estudianteId);
+    if (!ids.length) return [];
+    return this.userRepo.find({ where: { id: In(ids), activo: true } });
+  }
+
+  private async cursoParaAsignacion(cursoId: number): Promise<Course> {
+    const course = await this.repo.findOne({ where: { id: cursoId } });
+    if (!course) throw new NotFoundException('Curso no encontrado');
+    return course;
+  }
+
+  /** Lista de estudiantes asignados a un curso, con su estado de inscripción. */
+  async listarAsignados(cursoId: number) {
+    await this.cursoParaAsignacion(cursoId);
+    const asignaciones = await this.asignacionRepo.find({
+      where: { cursoId },
+      relations: ['estudiante'],
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    const inscripciones = await this.studentCourseRepo
+      .createQueryBuilder('sc')
+      .select(['sc.id', 'sc.estudianteId', 'sc.pagado'])
+      .where('sc.cursoId = :cursoId', { cursoId })
+      .getMany();
+    const inscritoMap = new Map<number, boolean>();
+    for (const i of inscripciones) {
+      inscritoMap.set(i.estudianteId, (inscritoMap.get(i.estudianteId) || false) || !!i.pagado);
+    }
+    return asignaciones
+      .filter((a) => !!a.estudiante)
+      .map((a) => ({
+        estudianteId: a.estudianteId,
+        nombres: a.estudiante.nombres,
+        apellidos: a.estudiante.apellidos,
+        correo: a.estudiante.correo,
+        celular: a.estudiante.celular,
+        asignadoEn: a.createdAt,
+        inscrito: inscritoMap.has(a.estudianteId),
+        pagado: inscritoMap.get(a.estudianteId) === true,
+      }));
+  }
+
+  /** Hasta 20 estudiantes (no suspendidos) aún NO asignados al curso que coincidan con `q`. */
+  async buscarAsignables(cursoId: number, q?: string) {
+    await this.cursoParaAsignacion(cursoId);
+    const qb = this.userRepo
+      .createQueryBuilder('u')
+      .select(['u.id', 'u.nombres', 'u.apellidos', 'u.correo', 'u.cedula', 'u.celular'])
+      .where('u.rol = :rol', { rol: 'ESTUDIANTE' })
+      .andWhere('u.suspendido = :susp', { susp: false })
+      .andWhere('u.activo = :act', { act: true })
+      .andWhere(
+        `NOT EXISTS (SELECT 1 FROM "curso_asignaciones" ca WHERE ca."estudianteId" = u.id AND ca."cursoId" = :cursoId)`,
+        { cursoId },
+      );
+
+    const texto = String(q ?? '').trim().slice(0, 100);
+    if (texto) {
+      // Escapar comodines de LIKE para que el texto se busque literalmente.
+      const like = `%${texto.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      qb.andWhere(
+        `(u.nombres ILIKE :like OR u.apellidos ILIKE :like OR u.correo ILIKE :like
+          OR u.cedula ILIKE :like OR u.usuario ILIKE :like
+          OR (u.nombres || ' ' || u.apellidos) ILIKE :like)`,
+        { like },
+      );
+    }
+
+    const users = await qb.orderBy('u.id', 'DESC').limit(20).getMany();
+    return users.map((u) => ({
+      id: u.id,
+      nombres: u.nombres,
+      apellidos: u.apellidos,
+      correo: u.correo,
+      cedula: u.cedula,
+      celular: u.celular,
+    }));
+  }
+
+  /**
+   * Asigna estudiantes a un curso PRIVADO.
+   *  - Curso gratis → además se les inscribe (student_courses, pagado=true).
+   *  - Curso de pago → solo quedan habilitados para verlo y pagarlo.
+   */
+  async asignarEstudiantes(
+    cursoId: number,
+    estudianteIds: number[],
+    adminId: number | null,
+    notificarCorreo = false,
+    notificarWhatsapp = false,
+  ) {
+    const course = await this.cursoParaAsignacion(cursoId);
+    if (!course.privado) throw new BadRequestException('El curso no es privado');
+
+    const ids = [...new Set((estudianteIds || []).map((x) => Number(x)))].filter(
+      (x) => Number.isInteger(x) && x > 0,
+    );
+    if (!ids.length) throw new BadRequestException('Selecciona al menos un estudiante');
+
+    const users = await this.userRepo.find({
+      where: { id: In(ids), rol: 'ESTUDIANTE', activo: true, suspendido: false },
+    });
+    if (users.length !== ids.length) {
+      throw new BadRequestException(
+        'Uno o más de los seleccionados no existen, no son estudiantes o están suspendidos',
+      );
+    }
+
+    const gratis = this.esCursoGratis(course);
+    const nuevosIds = new Set<number>();
+
+    await this.repo.manager.transaction(async (m) => {
+      for (const u of users) {
+        // ON CONFLICT: seguro ante doble clic / peticiones simultáneas.
+        const ins = await m.query(
+          `INSERT INTO "curso_asignaciones" ("cursoId", "estudianteId", "asignadoPor")
+           VALUES ($1, $2, $3)
+           ON CONFLICT ("cursoId", "estudianteId") DO NOTHING
+           RETURNING "id"`,
+          [cursoId, u.id, adminId ?? null],
+        );
+        if (Array.isArray(ins) && ins.length > 0) nuevosIds.add(u.id);
+
+        if (gratis) {
+          await m.query(
+            `INSERT INTO "student_courses" ("estudianteId", "cursoId", "pagado")
+             SELECT $1::int, $2::int, true
+              WHERE NOT EXISTS (
+                SELECT 1 FROM "student_courses" WHERE "estudianteId" = $1::int AND "cursoId" = $2::int
+              )`,
+            [u.id, cursoId],
+          );
+        }
+      }
+    });
+
+    const agregados = nuevosIds.size;
+    this.logger.log(
+      `🔒 Curso privado ${cursoId}: ${agregados} estudiante(s) asignado(s), ${ids.length - agregados} ya existían`,
+    );
+
+    if (agregados > 0 && (notificarCorreo || notificarWhatsapp)) {
+      const nuevos = users.filter((u) => nuevosIds.has(u.id));
+      this.enviarAvisoAsignacion(course, nuevos, notificarCorreo, notificarWhatsapp).catch((err) =>
+        this.logger.error(`Error notificando asignación: ${err.message}`),
+      );
+    }
+
+    return {
+      success: true,
+      agregados,
+      yaExistian: ids.length - agregados,
+      data: await this.listarAsignados(cursoId),
+    };
+  }
+
+  /** Quita la asignación de un estudiante a un curso privado. */
+  async quitarAsignado(cursoId: number, estudianteId: number) {
+    const course = await this.cursoParaAsignacion(cursoId);
+    const asignacion = await this.asignacionRepo.findOne({ where: { cursoId, estudianteId } });
+    if (!asignacion) throw new NotFoundException('El estudiante no está asignado a este curso');
+
+    const gratis = this.esCursoGratis(course);
+    if (!gratis) {
+      const inscrito = await this.studentCourseRepo.count({ where: { cursoId, estudianteId } });
+      if (inscrito > 0) {
+        throw new BadRequestException(
+          'El estudiante ya pagó este curso; no se puede quitar desde aquí',
+        );
+      }
+    }
+
+    await this.repo.manager.transaction(async (m) => {
+      await m.delete(CourseAssignment, { cursoId, estudianteId });
+      if (gratis) {
+        await m.delete(StudentCourse, { cursoId, estudianteId });
+      }
+    });
+
+    this.logger.log(`🔓 Curso privado ${cursoId}: estudiante ${estudianteId} desasignado`);
+    return {
+      success: true,
+      message: gratis
+        ? 'Estudiante quitado del curso (se eliminó su inscripción)'
+        : 'Estudiante quitado del curso',
+    };
+  }
+
+  /** Reenvía el aviso a TODOS los asignados de un curso privado (segundo plano). */
+  async notificarAsignados(cursoId: number, correo: boolean, whatsapp: boolean) {
+    const course = await this.cursoParaAsignacion(cursoId);
+    if (!course.privado) throw new BadRequestException('El curso no es privado');
+    if (!correo && !whatsapp) {
+      throw new BadRequestException('Selecciona al menos un canal (correo o WhatsApp)');
+    }
+    const asignados = await this.destinatariosBaseDeCurso(course);
+    const total = this.filtrarElegibles(asignados, correo, whatsapp).length;
+    this.enviarAvisoAsignacion(course, asignados, correo, whatsapp).catch((err) =>
+      this.logger.error(`Error notificando a asignados: ${err.message}`),
+    );
+    return { success: true, total };
+  }
+
+  // Elegibilidad por canal (mismas reglas que notifyAllStudentsBackground):
+  // nunca suspendidos; correo solo verificado y no inválido; WhatsApp con celular.
+  private puedeRecibirCorreo(e: User): boolean {
+    return !!e.correo && !!e.emailVerified && !e.suspendido && e.emailEstado !== 'invalido';
+  }
+
+  private puedeRecibirWhatsapp(e: User): boolean {
+    return !!e.celular && !e.suspendido;
+  }
+
+  private filtrarElegibles(estudiantes: User[], correo: boolean, whatsapp: boolean): User[] {
+    return estudiantes.filter(
+      (e) =>
+        e.activo !== false &&
+        ((correo && this.puedeRecibirCorreo(e)) || (whatsapp && this.puedeRecibirWhatsapp(e))),
+    );
+  }
+
+  /**
+   * Envía a los estudiantes indicados el aviso de que tienen un curso privado
+   * asignado. MailService y WhatsappService ya encolan y espacian los envíos
+   * (anti-baneo), así que aquí solo se encola. Devuelve cuántos eran elegibles.
+   */
+  private async enviarAvisoAsignacion(
+    course: Course,
+    estudiantes: User[],
+    correo: boolean,
+    whatsapp: boolean,
+  ): Promise<number> {
+    const elegibles = this.filtrarElegibles(estudiantes, correo, whatsapp);
+    if (!elegibles.length) return 0;
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://cursos.maat.ec';
+    const gratis = this.esCursoGratis(course);
+    const inscripciones = await this.studentCourseRepo
+      .createQueryBuilder('sc')
+      .select(['sc.id', 'sc.estudianteId'])
+      .where('sc.cursoId = :cursoId', { cursoId: course.id })
+      .getMany();
+    const inscritos = new Set(inscripciones.map((i) => i.estudianteId));
+    const waConectado = whatsapp ? !!this.whatsapp.getStatus().connected : false;
+    if (whatsapp && !waConectado) {
+      this.logger.warn('⚠️ WhatsApp no está conectado: se omiten los avisos por WhatsApp.');
+    }
+
+    const titulo = this.escapeHtml(course.titulo);
+    const fecha = String(course.fecha || 'Por confirmar');
+    const hora = String(course.hora || 'Por confirmar');
+    const precio = `$${Number(course.precio).toFixed(2)}`;
+
+    for (const est of elegibles) {
+      const yaInscrito = inscritos.has(est.id);
+      const accionHtml = yaInscrito
+        ? 'Ya estás <b>inscrito</b>. Ingresa a la plataforma y revisa la sección <b>Mis cursos</b>.'
+        : gratis
+          ? 'Ingresa a la plataforma para inscribirte sin costo.'
+          : `Ingresa a la plataforma para completar tu inscripción (valor: <b>${precio}</b>).`;
+      const accionTxt = yaInscrito
+        ? 'Ya estás inscrito. Ingresa a la plataforma y revisa "Mis cursos".'
+        : gratis
+          ? 'Ingresa a la plataforma para inscribirte sin costo.'
+          : `Ingresa a la plataforma para completar tu inscripción (valor: ${precio}).`;
+
+      if (correo && this.puedeRecibirCorreo(est)) {
+        const html = `
+<div style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:0 auto;">
+  <h2 style="color:#ff6b35;">🎓 Tienes un curso asignado</h2>
+  <p>Hola <b>${this.escapeHtml(est.nombres || '')}</b>,</p>
+  <p style="font-size:16px;line-height:1.5;">Se te ha habilitado el curso <b>${titulo}</b>.</p>
+  <div style="background:#f8f9fa;padding:15px;border-radius:8px;margin:20px 0;">
+    <p><b>📅 Fecha:</b> ${this.escapeHtml(fecha)}</p>
+    <p><b>🕐 Hora:</b> ${this.escapeHtml(hora)}</p>
+  </div>
+  <p style="font-size:15px;line-height:1.5;">${accionHtml}</p>
+  <div style="text-align:center;margin:25px 0;">
+    <a href="${this.escapeHtml(frontendUrl)}" style="background:#ff6b35;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:16px;">
+      🚀 Ir a la plataforma
+    </a>
+  </div>
+  <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
+  <small style="color:#999;">Sistema de Cursos MAAT</small>
+</div>`.trim();
+        this.mail
+          .sendMail(est.correo, `🎓 Curso asignado: ${course.titulo}`, html)
+          .then(() => this.logger.log(`📧 Aviso de asignación enviado a ${est.correo}`))
+          .catch((e) => this.logger.error(`❌ Error correo a ${est.correo}: ${e?.message}`));
+      }
+
+      if (whatsapp && waConectado && this.puedeRecibirWhatsapp(est)) {
+        const mensaje = `🎓 *CURSO ASIGNADO*
+
+Hola ${est.nombres} 👋
+
+Se te ha habilitado el curso:
+📚 *${course.titulo}*
+
+📅 *Fecha:* ${fecha}
+🕐 *Hora:* ${hora}
+
+${accionTxt}
+
+🌐 ${frontendUrl}`;
+        this.whatsapp
+          .sendText(est.celular, mensaje)
+          .then(() => this.logger.log(`📱 Aviso de asignación enviado a ${est.celular}`))
+          .catch((e) => this.logger.error(`❌ Error WhatsApp a ${est.celular}: ${e?.message}`));
+      }
+    }
+
+    this.logger.log(
+      `📢 Curso privado ${course.id}: aviso de asignación encolado para ${elegibles.length} estudiante(s)`,
+    );
+    return elegibles.length;
   }
 }

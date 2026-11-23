@@ -13,8 +13,11 @@ export class StatsService {
     @InjectRepository(StudentCourse) private studentCourseRepo: Repository<StudentCourse>,
   ) {}
 
-  async getGeneralStats() {
-    const totalCursos = await this.courseRepo.count({ where: { activo: true } });
+  async getGeneralStats(incluirPrivados = false) {
+    // SEGURIDAD: los cursos privados solo cuentan para el ADMIN.
+    const totalCursos = await this.courseRepo.count({
+      where: incluirPrivados ? { activo: true } : { activo: true, privado: false },
+    });
     const totalEstudiantes = await this.userRepo.count({ where: { rol: 'ESTUDIANTE' } });
     const totalProfesores = await this.userRepo.count({ where: { rol: 'ADMIN' } }); // o donde almacenas profesores
     const totalInscripciones = await this.studentCourseRepo.count();

@@ -169,7 +169,20 @@ export class PaymentsController {
       throw new BadRequestException('Este curso ya finalizó');
     }
 
-    if (course.cupos <= 0) {
+    if (course.privado) {
+      // SEGURIDAD: un curso privado solo lo puede pagar / inscribirse quien
+      // esté ASIGNADO (o un ADMIN). Mismo mensaje que un curso archivado para
+      // no revelar que existe. En cursos privados no aplica el control de cupos.
+      if (requestUser.rol !== 'ADMIN') {
+        const asignado = await this.coursesService.estaAsignado(course.id, userId);
+        if (!asignado) {
+          this.logger.warn(
+            `🚫 Intento de acceso a curso privado sin asignación - Usuario ID: ${userId} - Curso: ${course.id}`,
+          );
+          throw new BadRequestException('Este curso no está disponible');
+        }
+      }
+    } else if (course.cupos <= 0) {
       throw new BadRequestException('No hay cupos disponibles');
     }
 
@@ -781,6 +794,15 @@ export class PaymentsController {
           `❌ Curso no encontrado - Curso ID: ${body.cursoId} - Usuario: ${userId}`,
         );
         throw new BadRequestException('Curso no encontrado');
+      }
+
+      // SEGURIDAD: curso privado → solo asignados (o ADMIN) pueden verificar cupones
+      if (
+        course.privado &&
+        req.user.rol !== 'ADMIN' &&
+        !(await this.coursesService.estaAsignado(course.id, userId))
+      ) {
+        throw new BadRequestException('Este curso no está disponible');
       }
 
       // ✅ OBTENER INFORMACIÓN DEL USUARIO PARA LOGS

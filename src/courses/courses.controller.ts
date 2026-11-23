@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -24,6 +25,7 @@ import { AIService } from '../common/ai.service';
 import { SkipThrottle } from '@nestjs/throttler';
 import { isDateOnlyExpired } from '../common/date.util';
 import { ensureValidImage, imageFileFilter } from '../common/upload.util';
+import { AsignarEstudiantesDto, NotificarAsignadosDto } from './dto/asignaciones.dto';
 
 // VULN-09: validación por magic bytes y nombres seguros → common/upload.util.ts
 const imageUploadOptions = {
@@ -104,6 +106,8 @@ export class CoursesController {
       profesorAsignatura,
       categoriaId: body.categoriaId ? Number(body.categoriaId) : null,
       precio: Math.round(parseFloat(body.precio || 0) * 100) / 100,
+      // Curso privado: multipart lo envía como "true"/"false"
+      privado: body.privado === true || body.privado === 'true',
     });
   }
 
@@ -142,6 +146,11 @@ export class CoursesController {
           : Number(body.categoriaId);
     }
 
+    // privado: multipart lo envía como "true"/"false"; si no viene, no se toca
+    if (body.privado !== undefined) {
+      updateData.privado = body.privado === true || body.privado === 'true';
+    }
+
     if (file) {
       updateData.imagen = file.filename;
     }
@@ -168,11 +177,25 @@ export class CoursesController {
   }
 
   // ✅ OBTENER TODOS LOS CURSOS (ENDPOINT PÚBLICO CON DATOS FILTRADOS)
+  // Público (landing): nunca incluye cursos privados. Si quien consulta es un
+  // ADMIN con sesión válida, incluye también los privados (las pantallas del
+  // panel admin — Todos los cursos, Material, Publicidad, Cupones, Dashboard —
+  // usan este endpoint).
   @SkipThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('all')
-  async all() {
-    const courses = await this.coursesService.findAll();
-    return this.filterPublicCourseData(courses);
+  async all(@Request() req) {
+    const esAdmin = req.user?.rol === 'ADMIN';
+    const courses = await this.coursesService.findAll({ incluirPrivados: esAdmin });
+    const data = this.filterPublicCourseData(courses);
+    return esAdmin ? this.conAsignados(data) : data;
+  }
+
+  /** Panel admin: añade `totalAsignados` a los cursos privados. */
+  private async conAsignados(cursos: any[]) {
+    const ids = cursos.filter((c) => c.privado).map((c) => c.id);
+    const mapa = await this.coursesService.contarAsignados(ids);
+    return cursos.map((c) => (c.privado ? { ...c, totalAsignados: mapa.get(c.id) || 0 } : c));
   }
 
   // ✅ OBTENER CURSOS DEL USUARIO AUTENTICADO
@@ -237,6 +260,7 @@ export class CoursesController {
         activo: course.activo,
         finalizado: course.finalizado ?? false,
         categoriaId: course.categoriaId ?? null,
+        privado: course.privado ?? false,
         // ✅ SOLO INDICAR SI HAY CUPONES, SIN CONTADOR
         tieneCupones: cuponesActivos.length > 0
       };
@@ -269,7 +293,7 @@ export class CoursesController {
   ) {
     try {
       const result = await this.coursesService.findInactiveCourses(+page, +limit, search);
-      return { ...result, data: this.filterPublicCourseData(result.data) };
+      return { ...result, data: await this.conAsignados(this.filterPublicCourseData(result.data)) };
     } catch (error) {
       throw error;
     }
@@ -285,7 +309,7 @@ export class CoursesController {
     @Query('search') search = '',
   ) {
     const result = await this.coursesService.findAllForAdmin(+page, +limit, search);
-    return { ...result, data: this.filterPublicCourseData(result.data) };
+    return { ...result, data: await this.conAsignados(this.filterPublicCourseData(result.data)) };
   }
 
   // ✅ ACTIVAR CURSO (RESTAURAR)
@@ -322,6 +346,66 @@ export class CoursesController {
   @Delete(':id/permanent')
   async deleteCoursePermanently(@Param('id', ParseIntPipe) id: number) {
     return this.coursesService.deleteCoursePermanently(id);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  //  CURSOS PRIVADOS — ESTUDIANTES ASIGNADOS (solo ADMIN)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Estudiantes asignados al curso (con estado de inscripción/pago). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/asignados')
+  async listarAsignados(@Param('id', ParseIntPipe) id: number) {
+    return { success: true, data: await this.coursesService.listarAsignados(id) };
+  }
+
+  /** Búsqueda de estudiantes que aún no están asignados al curso (máx. 20). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get(':id/asignables')
+  async buscarAsignables(@Param('id', ParseIntPipe) id: number, @Query('q') q?: string) {
+    return { success: true, data: await this.coursesService.buscarAsignables(id, q) };
+  }
+
+  /** Reenvía el aviso (correo/WhatsApp) a todos los asignados. Envío en segundo plano. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/asignados/notificar')
+  async notificarAsignados(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: NotificarAsignadosDto,
+  ) {
+    return this.coursesService.notificarAsignados(id, body.correo === true, body.whatsapp === true);
+  }
+
+  /** Asigna estudiantes a un curso privado (si es gratis, además los inscribe). */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post(':id/asignados')
+  async asignarEstudiantes(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: AsignarEstudiantesDto,
+    @Request() req,
+  ) {
+    return this.coursesService.asignarEstudiantes(
+      id,
+      body.estudianteIds,
+      Number(req.user?.userId) || null,
+      body.notificarCorreo === true,
+      body.notificarWhatsapp === true,
+    );
+  }
+
+  /** Quita a un estudiante de un curso privado. */
+  @Roles('ADMIN')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Delete(':id/asignados/:estudianteId')
+  async quitarAsignado(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('estudianteId', ParseIntPipe) estudianteId: number,
+  ) {
+    return this.coursesService.quitarAsignado(id, estudianteId);
   }
 
   // ───────────────────────────────────────────────────────────────────────────

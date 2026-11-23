@@ -32,8 +32,10 @@ export class ApplyCouponDto {
   @IsString()
   codigo: string;
 
+  /** Obsoleto: se ignora. El usuario se toma SIEMPRE del token. */
+  @IsOptional()
   @IsNumber()
-  userId: number;
+  userId?: number;
 }
 
 export class VerifyCouponDto {
@@ -43,8 +45,10 @@ export class VerifyCouponDto {
   @IsString()
   codigo: string;
 
+  /** Obsoleto: se ignora. El usuario se toma SIEMPRE del token. */
+  @IsOptional()
   @IsNumber()
-  userId: number;
+  userId?: number;
 }
 
 export class UpdateCouponDto {

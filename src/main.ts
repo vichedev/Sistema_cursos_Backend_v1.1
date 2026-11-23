@@ -148,7 +148,22 @@ async function bootstrap() {
       legacyHeaders: false,
       message: { message: 'Demasiadas solicitudes. Intenta nuevamente en 15 minutos.' },
     });
+    // Evaluaciones: el autoguardado genera muchas peticiones por estudiante y un
+    // grupo completo puede rendir desde la MISMA IP (aula / empresa). Con el
+    // límite global (500 / 15 min por IP) un examen se cortaría con 429 y se
+    // perderían respuestas. Estas rutas (autenticadas y con control de dueño)
+    // tienen un límite propio más amplio, pero siguen limitadas.
+    const examLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 6000,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Demasiadas solicitudes. Intenta nuevamente en unos minutos.' },
+    });
     app.use((req: any, res: any, next: any) => {
+      if (req.path.startsWith('/api/evaluaciones/intentos/')) {
+        return examLimiter(req, res, next);
+      }
       // SSE y rutas GET de alta frecuencia no necesitan rate limit global
       const skipPaths = ['/api/notifications/stream', '/api/courses/all', '/api/courses/disponibles', '/api/courses/mis-cursos', '/api/stats/general'];
       if (skipPaths.some(p => req.path.startsWith(p)) || (req.method === 'GET' && req.path.match(/^\/api\/courses\/\d+\/(estudiantes|estudiantes-con-pagos)$/))) {

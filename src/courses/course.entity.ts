@@ -68,6 +68,10 @@ export class Course {
   @Column({ type: 'int', nullable: true })
   categoriaId: number | null;
 
+  /** Curso PRIVADO: solo lo ven el admin y los estudiantes asignados (curso_asignaciones). */
+  @Column({ default: false })
+  privado: boolean;
+
   @OneToMany(() => StudentCourse, (studentCourse) => studentCourse.curso)
   studentCourses: StudentCourse[];
 

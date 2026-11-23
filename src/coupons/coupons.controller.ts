@@ -10,7 +10,8 @@ import {
   UseGuards,
   BadRequestException,
   UsePipes,
-  ValidationPipe
+  ValidationPipe,
+  Request,
 } from '@nestjs/common';
 import { CouponsService } from './coupons.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -45,14 +46,19 @@ export class CouponsController {
   // ===============================
   // ✅ APLICAR CUPÓN (ESTUDIANTES)
   // ===============================
+  // SEGURIDAD: este endpoint consume un uso del cupón sin inscribir a nadie y
+  // antes aceptaba cualquier userId del body (un estudiante podía agotar los
+  // cupones de un curso). El frontend no lo usa: los cupones se consumen en el
+  // flujo de pago (payments). Queda solo para ADMIN y con el usuario del token.
   @Post('apply')
+  @Roles('ADMIN')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  async applyCoupon(@Body() applyCouponDto: ApplyCouponDto) {
+  async applyCoupon(@Body() applyCouponDto: ApplyCouponDto, @Request() req) {
     try {
       return await this.couponsService.validateAndApplyCoupon(
         applyCouponDto.cursoId,
         applyCouponDto.codigo,
-        applyCouponDto.userId
+        req.user.userId,
       );
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -64,12 +70,13 @@ export class CouponsController {
   // ===============================
   @Post('verify')
   @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
-  async verifyCoupon(@Body() verifyCouponDto: VerifyCouponDto) {
+  async verifyCoupon(@Body() verifyCouponDto: VerifyCouponDto, @Request() req) {
     try {
+      // SEGURIDAD: el usuario sale del token, nunca del body
       return await this.couponsService.verifyCoupon(
         verifyCouponDto.cursoId,
         verifyCouponDto.codigo,
-        verifyCouponDto.userId
+        req.user.userId,
       );
     } catch (error) {
       throw new BadRequestException(error.message);

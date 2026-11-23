@@ -250,7 +250,8 @@ export class DiplomasService {
     const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
     await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
-    this.sse.emitDiplomaGenerated(estudianteId, cursoId, course.titulo);
+    // El stream SSE es público: no difundir el título de cursos privados
+    this.sse.emitDiplomaGenerated(estudianteId, cursoId, course.privado ? null : course.titulo);
 
     return { success: true, message: `Diploma enviado a ${student.correo}`, codigo };
   }
@@ -339,7 +340,7 @@ export class DiplomasService {
               const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
               await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
-              this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo);
+              this.sse.emitDiplomaGenerated(student.id, cursoId, course.privado ? null : course.titulo);
               job.enviados++;
               this.logger.log(`✅ [Lote ${loteIdx + 1}] Diploma enviado a ${student.correo}`);
             } catch (err: any) {

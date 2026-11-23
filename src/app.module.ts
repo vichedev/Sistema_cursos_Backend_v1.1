@@ -22,6 +22,8 @@ import { DiplomasModule } from './diplomas/diplomas.module';
 import { SettingsModule } from './settings/settings.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+// ✅ NUEVO: evaluaciones de diagnóstico
+import { EvaluationsModule } from './evaluations/evaluations.module';
 
 @Module({
   imports: [
@@ -68,6 +70,8 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     CampaignsModule,
     // ✅ NUEVO: categorías de cursos
     CategoriesModule,
+    // ✅ NUEVO: evaluaciones de diagnóstico (cursos privados / asignados)
+    EvaluationsModule,
   ],
 })
 export class AppModule { }

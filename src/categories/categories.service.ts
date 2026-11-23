@@ -20,6 +20,8 @@ export class CategoriesService {
       .select('c.categoriaId', 'categoriaId')
       .addSelect('COUNT(*)', 'total')
       .where('c.categoriaId IS NOT NULL')
+      // SEGURIDAD: endpoint público → los cursos privados no se cuentan.
+      .andWhere('c.privado = :privado', { privado: false })
       .groupBy('c.categoriaId')
       .getRawMany();
     const map = new Map(counts.map((r) => [Number(r.categoriaId), Number(r.total)]));
