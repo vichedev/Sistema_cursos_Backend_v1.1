@@ -20,16 +20,11 @@ import { CampaignsService } from './campaigns.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { ensureValidImages, imageFileFilter } from '../common/upload.util';
 
 const imageUploadOptions = {
   limits: { fileSize: 6 * 1024 * 1024 }, // 6 MB
-  fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!allowed.includes(file.mimetype)) {
-      return cb(new BadRequestException('Solo se permiten imágenes JPEG, PNG, WebP o GIF'), false);
-    }
-    cb(null, true);
-  },
+  fileFilter: imageFileFilter,
 };
 
 @Controller('campaigns')
@@ -62,6 +57,7 @@ export class CampaignsController {
     @UploadedFiles() files: Express.Multer.File[],
     @Request() req: any,
   ) {
+    ensureValidImages(files);
     const imagenes = (files || []).map((f) => f.filename);
     const campaign = await this.campaigns.create(body, imagenes, req.user?.userId);
 
@@ -79,6 +75,7 @@ export class CampaignsController {
     @Body() body: any,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
+    ensureValidImages(files);
     const nuevasImagenes = (files || []).map((f) => f.filename);
     const campaign = await this.campaigns.update(id, body, nuevasImagenes);
 

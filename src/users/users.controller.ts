@@ -31,23 +31,16 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { EmailValidatorService } from '../common/email-validator.service';
 import { MailService } from '../common/mail.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ensureValidImage, imageFileFilter, imageFilename } from '../common/upload.util';
 
-// Opciones de subida para la foto de perfil
+// Opciones de subida para la foto de perfil (nombre aleatorio + extensión según tipo)
 const avatarUploadOptions = {
   storage: diskStorage({
     destination: join(__dirname, '..', '..', 'uploads'),
-    filename: (_req: any, file: Express.Multer.File, cb: any) => {
-      cb(null, `avatar-${Date.now()}-${file.originalname.replace(/\s/g, '_')}`);
-    },
+    filename: imageFilename('avatar-'),
   }),
   limits: { fileSize: 4 * 1024 * 1024 }, // 4 MB
-  fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!allowed.includes(file.mimetype)) {
-      return cb(new BadRequestException('Solo se permiten imágenes JPEG, PNG, WebP o GIF'), false);
-    }
-    cb(null, true);
-  },
+  fileFilter: imageFileFilter,
 };
 
 @Controller('users')
@@ -61,6 +54,41 @@ export class UsersController {
     private readonly mail: MailService,
     private readonly whatsapp: WhatsappService,
   ) { }
+
+  // ===============================
+  // ✅ VALIDACIÓN DE CAMPOS DE TEXTO (anti-XSS / inyección HTML)
+  // ===============================
+  // Los endpoints de edición no usan DTO, así que validamos aquí. Antes un
+  // estudiante podía poner `<img onerror=...>` como nombre vía profile/me y se
+  // ejecutaba en el panel del admin y en los correos. Se rechazan `<` `>` y
+  // caracteres de control; no se tocan apóstrofes/comillas para no romper
+  // datos legítimos existentes (empresas, apellidos compuestos...).
+  private validateTextFields(data: Record<string, any>): void {
+    const limits: Record<string, number> = {
+      nombres: 100, apellidos: 100, ciudad: 120, empresa: 150,
+      cargo: 100, asignatura: 150, pais: 60, usuario: 50,
+    };
+    for (const [campo, max] of Object.entries(limits)) {
+      const v = data[campo];
+      if (v === undefined || v === null) continue;
+      if (typeof v !== 'string') {
+        throw new BadRequestException(`El campo ${campo} no es válido`);
+      }
+      // eslint-disable-next-line no-control-regex
+      if (/[<>\u0000-\u001f\u007f]/.test(v)) {
+        throw new BadRequestException(`El campo ${campo} contiene caracteres no permitidos (< >)`);
+      }
+      if (v.length > max) {
+        throw new BadRequestException(`El campo ${campo} no puede superar ${max} caracteres`);
+      }
+      data[campo] = v.trim();
+    }
+    for (const campo of ['nombres', 'apellidos']) {
+      if (data[campo] !== undefined && !/\p{L}/u.test(data[campo])) {
+        throw new BadRequestException(`El campo ${campo} debe contener letras`);
+      }
+    }
+  }
 
   // ===============================
   // ✅ MÉTODO DE VALIDACIÓN DE SEGURIDAD
@@ -276,7 +304,26 @@ export class UsersController {
       throw new BadRequestException('No puedes desactivar tu propia cuenta');
     }
 
-    return this.usersService.update(id, updateData);
+    // SEGURIDAD: el body no se valida con DTO, así que filtramos campos.
+    // - Nunca se aceptan tokens internos ni relaciones.
+    // - Un no-admin solo puede tocar campos seguros (como en profile/me);
+    //   antes podía auto-asignarse emailVerified, quitarse la suspensión,
+    //   cambiar correo/cédula, etc.
+    const neverAllowed = [
+      'id', 'passwordResetToken', 'passwordResetExpiresAt',
+      'emailVerificationToken', 'emailVerificationSentAt',
+      'studentCourses', 'cursosDictados',
+    ];
+    const studentAllowed = ['nombres', 'apellidos', 'ciudad', 'empresa', 'cargo', 'pais'];
+    const safe: any = {};
+    for (const [k, v] of Object.entries(updateData || {})) {
+      if (neverAllowed.includes(k)) continue;
+      if (req.user.rol !== 'ADMIN' && !studentAllowed.includes(k)) continue;
+      safe[k] = v;
+    }
+
+    this.validateTextFields(safe);
+    return this.usersService.update(id, safe);
   }
 
   @Delete(':id')
@@ -330,6 +377,7 @@ export class UsersController {
     if (!safe.nombres && safe.nombres !== undefined && !String(safe.nombres).trim()) {
       throw new BadRequestException('El nombre no puede estar vacío');
     }
+    this.validateTextFields(safe);
     await this.usersService.update(req.user.userId, safe);
     return this.getUserById(req.user.userId, req);
   }
@@ -489,6 +537,8 @@ export class UsersController {
   @UseInterceptors(FileInterceptor('foto', avatarUploadOptions))
   async updateMyAvatar(@UploadedFile() file: Express.Multer.File, @Request() req) {
     if (!file) throw new BadRequestException('No se recibió ninguna imagen');
+    // SEGURIDAD: el contenido real debe ser una imagen (no basta el Content-Type)
+    ensureValidImage(file);
     await this.usersService.update(req.user.userId, { foto: file.filename } as Partial<User>);
     return { success: true, foto: file.filename, message: 'Foto de perfil actualizada' };
   }

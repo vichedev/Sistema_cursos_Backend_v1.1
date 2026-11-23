@@ -1,4 +1,5 @@
 // src/diplomas/diplomas.service.ts
+import { randomInt } from 'crypto';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -31,7 +32,9 @@ export class DiplomasService {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   private generarCodigo(courseId: number, studentId: number): string {
-    const rand = Math.random().toString(36).substring(2, 9).toUpperCase();
+    // Aleatorio criptográfico (antes Math.random, predecible). Mismo formato: 7 caracteres A-Z0-9.
+    const ALFABETO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const rand = Array.from({ length: 7 }, () => ALFABETO[randomInt(ALFABETO.length)]).join('');
     return `MAAT-${courseId.toString().padStart(4, '0')}-${studentId.toString().padStart(6, '0')}-${rand}`;
   }
 
@@ -247,7 +250,7 @@ export class DiplomasService {
     const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
     await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
-    this.sse.emitDiplomaGenerated(estudianteId, cursoId, course.titulo, codigo, student.nombres);
+    this.sse.emitDiplomaGenerated(estudianteId, cursoId, course.titulo);
 
     return { success: true, message: `Diploma enviado a ${student.correo}`, codigo };
   }
@@ -336,7 +339,7 @@ export class DiplomasService {
               const emailHtml = this.buildEmailHtml(student, course, codigo, urlPdf);
               await this.mailService.sendDiploma(student.correo, course.titulo, emailHtml, student.nombres);
 
-              this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo, codigo, student.nombres);
+              this.sse.emitDiplomaGenerated(student.id, cursoId, course.titulo);
               job.enviados++;
               this.logger.log(`✅ [Lote ${loteIdx + 1}] Diploma enviado a ${student.correo}`);
             } catch (err: any) {

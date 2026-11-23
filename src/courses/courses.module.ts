@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
+import { imageFilename } from '../common/upload.util';
 import { join } from 'path';
 
 import { Course } from './course.entity';
@@ -28,10 +29,7 @@ import { CouponsModule } from '../coupons/coupons.module';
     MulterModule.register({
       storage: diskStorage({
         destination: join(__dirname, '..', '..', 'uploads'),
-        filename: (req, file, cb) => {
-          const uniqueName = Date.now() + '-' + file.originalname.replace(/\s/g, '_');
-          cb(null, uniqueName);
-        },
+        filename: imageFilename(),
       }),
     }),
   ],

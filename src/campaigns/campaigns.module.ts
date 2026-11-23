@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
+import { imageFilename } from '../common/upload.util';
 import { join } from 'path';
 
 import { Campaign } from './campaign.entity';
@@ -18,10 +19,7 @@ import { CampaignsController } from './campaigns.controller';
     MulterModule.register({
       storage: diskStorage({
         destination: join(__dirname, '..', '..', 'uploads'),
-        filename: (_req, file, cb) => {
-          const uniqueName = Date.now() + '-' + file.originalname.replace(/\s/g, '_');
-          cb(null, uniqueName);
-        },
+        filename: imageFilename(),
       }),
     }),
   ],

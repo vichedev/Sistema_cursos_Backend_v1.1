@@ -1,3 +1,7 @@
+-- ⚠️ HEREDADO: el esquema ahora lo gestiona la migración TypeORM
+-- src/database/migrations/1764000000000-BaselineSchema.ts (se aplica sola al arrancar).
+-- Se conserva porque deploy.sh lo ejecuta; es compatible con la migración.
+
 -- Tablas nuevas para Configuración, WhatsApp y Publicidad/Campañas
 -- Generado desde el esquema real de TypeORM (BD de desarrollo).
 -- Seguro de ejecutar: usa CREATE TABLE IF NOT EXISTS.

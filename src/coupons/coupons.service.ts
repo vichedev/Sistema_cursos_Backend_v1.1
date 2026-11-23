@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -98,7 +99,8 @@ export class CouponsService {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let codigo = '';
     for (let i = 0; i < 8; i++) {
-      codigo += chars.charAt(Math.floor(Math.random() * chars.length));
+      // randomInt (criptográfico): un cupón adivinable podría dar cursos gratis
+      codigo += chars.charAt(randomInt(chars.length));
     }
     return codigo;
   }

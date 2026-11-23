@@ -224,20 +224,33 @@ verify_operation_success() {
     fi
 }
 
-# ✅ FUNCIÓN NUEVA: Aplicar esquema de tablas nuevas (idempotente y seguro)
-# Crea las tablas de Configuración, Campañas y Destinatarios si no existen.
-# No altera ni borra nada existente (usa CREATE TABLE IF NOT EXISTS).
+# ✅ Verificar migraciones de base de datos
+# El esquema lo gestiona ahora el backend con migraciones TypeORM
+# (src/database/migrations): al arrancar aplica las pendientes, cada una en una
+# transacción (si algo falla, se revierte y la BD queda como estaba).
+# Esta función solo ESPERA a que el backend termine y muestra el resultado.
+# (Ya no ejecuta init-prod-tablas-nuevas.sql: en una instalación nueva duplicaba
+#  llaves foráneas e índices.)
 apply_new_tables() {
-    local sql_file="init-prod-tablas-nuevas.sql"
-    if [ ! -f "$sql_file" ]; then
-        return 0
-    fi
-    echo -e "${YELLOW}🗄️  Aplicando esquema de tablas nuevas (idempotente)...${NC}"
-    if docker exec -i cursos_postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$sql_file" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ Esquema de tablas verificado/creado${NC}"
-    else
-        echo -e "${YELLOW}⚠️  No se pudo aplicar el esquema (revisa que PostgreSQL esté listo)${NC}"
-    fi
+    echo -e "${YELLOW}🗄️  Esperando a que el backend aplique las migraciones...${NC}"
+    local i
+    for i in $(seq 1 45); do
+        if docker logs cursos_backend 2>&1 | tail -n 200 | grep -q "BACKEND INICIADO CORRECTAMENTE"; then
+            echo -e "${GREEN}✅ Backend iniciado. Migraciones aplicadas:${NC}"
+            docker exec cursos_postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT name FROM migrations ORDER BY id"' 2>/dev/null | sed 's/^/     • /'
+            return 0
+        fi
+        if docker logs cursos_backend 2>&1 | tail -n 50 | grep -q "ERROR CRÍTICO AL INICIAR"; then
+            break
+        fi
+        sleep 2
+    done
+    echo -e "${RED}❌ El backend no terminó de iniciar (posible error de migración).${NC}"
+    echo -e "${YELLOW}   La BD NO se modificó a medias: cada migración se revierte si falla.${NC}"
+    echo -e "${YELLOW}   Últimas líneas del log del backend:${NC}"
+    docker logs --tail 30 cursos_backend 2>&1
+    echo -e "${YELLOW}💡 Si necesitas volver atrás, usa la opción de restaurar respaldo.${NC}"
+    return 1
 }
 
 # Función para verificar si el sistema está configurado

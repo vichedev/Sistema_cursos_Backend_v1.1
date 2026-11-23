@@ -348,21 +348,37 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token requerido');
     }
 
+    let payload: any;
     try {
-      const payload = this.jwtService.verify(refreshToken, {
+      payload = this.jwtService.verify(refreshToken, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
-
-      const newAccessToken = this.signAccessToken(payload.sub, payload.rol);
-
-      return { token: newAccessToken };
-
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         throw new UnauthorizedException('Sesión expirada. Por favor inicia sesión nuevamente.');
       }
       throw new UnauthorizedException('Token inválido. Por favor inicia sesión nuevamente.');
     }
+
+    // SEGURIDAD: el refresh token es válido 7 días y antes no se volvía a
+    // consultar al usuario: una cuenta suspendida/eliminada seguía renovando
+    // sesión, y un admin degradado conservaba el rol ADMIN. Ahora se aplican
+    // las mismas reglas que en el login y el rol se toma de la BD.
+    const user = await this.userRepo.findOne({
+      where: { id: Number(payload?.sub) },
+      select: { id: true, rol: true, suspendido: true, emailVerified: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Tu cuenta ya no existe. Por favor inicia sesión nuevamente.');
+    }
+    if (user.suspendido) {
+      throw new UnauthorizedException('Tu cuenta está suspendida. Contacta a soporte.');
+    }
+    if (!user.emailVerified) {
+      throw new UnauthorizedException('Debes verificar tu correo antes de continuar.');
+    }
+
+    return { token: this.signAccessToken(user.id, user.rol) };
   }
 
   // ── Verify Email ──────────────────────────────────────────────────────────

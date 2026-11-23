@@ -7,7 +7,9 @@ export type SseEvent =
   | { type: 'COURSE_NOTIFY_PROGRESS'; courseId: number; completed: number; total: number }
   | { type: 'COURSE_NOTIFY_DONE'; courseId: number }
   | { type: 'NEW_COURSE'; courseId: number; titulo: string; tipo: string; precio: number; imagen: string | null }
-  | { type: 'DIPLOMA_GENERATED'; estudianteId: number; courseId: number; titulo: string; codigo: string; nombres: string };
+  // SEGURIDAD: el stream es público y llega a todos los conectados → NO incluir
+  // datos personales ni el código del diploma (con él se descarga el PDF).
+  | { type: 'DIPLOMA_GENERATED'; estudianteId: number; courseId: number; titulo: string };
 
 @Injectable()
 export class NotificationsSseService {
@@ -68,9 +70,9 @@ export class NotificationsSseService {
     );
   }
 
-  emitDiplomaGenerated(estudianteId: number, courseId: number, titulo: string, codigo: string, nombres: string) {
+  emitDiplomaGenerated(estudianteId: number, courseId: number, titulo: string) {
     this.stream$.next({
-      data: { type: 'DIPLOMA_GENERATED', estudianteId: Number(estudianteId), courseId: Number(courseId), titulo, codigo, nombres },
+      data: { type: 'DIPLOMA_GENERATED', estudianteId: Number(estudianteId), courseId: Number(courseId), titulo },
     } as MessageEvent);
   }
 

@@ -23,63 +23,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AIService } from '../common/ai.service';
 import { SkipThrottle } from '@nestjs/throttler';
 import { isDateOnlyExpired } from '../common/date.util';
-import * as fs from 'fs';
+import { ensureValidImage, imageFileFilter } from '../common/upload.util';
 
-// VULN-09: Validación por magic bytes — no confiar solo en extensión
-function validateImageMimeType(buffer: Buffer): boolean {
-  if (!buffer || buffer.length < 4) return false;
-  // JPEG: FF D8 FF
-  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return true;
-  // PNG: 89 50 4E 47
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true;
-  // WebP: 52 49 46 46 ... 57 45 42 50
-  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-      buffer.length >= 12 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) return true;
-  // GIF: 47 49 46 38
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return true;
-  return false;
-}
-
-// VULN-09: Con diskStorage (multer) el archivo NO trae `buffer`, sino `path`.
-// Leemos los primeros bytes del disco para validar los magic bytes.
-function ensureValidImage(file: Express.Multer.File): void {
-  if (!file) return;
-
-  let header: Buffer | undefined = file.buffer;
-
-  if ((!header || header.length < 12) && file.path) {
-    try {
-      const fd = fs.openSync(file.path, 'r');
-      try {
-        const tmp = Buffer.alloc(12);
-        const bytesRead = fs.readSync(fd, tmp, 0, 12, 0);
-        header = tmp.subarray(0, bytesRead);
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch {
-      header = undefined;
-    }
-  }
-
-  if (!validateImageMimeType(header as Buffer)) {
-    // Limpiar el archivo inválido que multer ya escribió en disco
-    if (file.path) {
-      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
-    }
-    throw new BadRequestException('El archivo no es una imagen válida');
-  }
-}
-
+// VULN-09: validación por magic bytes y nombres seguros → common/upload.util.ts
 const imageUploadOptions = {
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
-  fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!allowedMimes.includes(file.mimetype)) {
-      return cb(new BadRequestException('Solo se permiten imágenes JPEG, PNG, WebP o GIF'), false);
-    }
-    cb(null, true);
-  },
+  fileFilter: imageFileFilter,
 };
 
 @Controller('courses')

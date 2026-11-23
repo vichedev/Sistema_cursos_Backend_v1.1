@@ -161,6 +161,14 @@ export class PaymentsController {
       throw new BadRequestException('Curso no existe');
     }
 
+    // SEGURIDAD: no permitir pagar/inscribirse en cursos archivados o finalizados
+    if (!course.activo) {
+      throw new BadRequestException('Este curso no está disponible');
+    }
+    if (course.finalizado) {
+      throw new BadRequestException('Este curso ya finalizó');
+    }
+
     if (course.cupos <= 0) {
       throw new BadRequestException('No hay cupos disponibles');
     }
@@ -468,7 +476,26 @@ export class PaymentsController {
         id,
         clientTransactionId,
       );
-      const estadoReal = confirmacionData.transactionStatus;
+      let estadoReal = confirmacionData.transactionStatus;
+
+      // SEGURIDAD: la respuesta aprobada debe corresponder a ESTA transacción y
+      // al monto que se cobró. Si no coincide, no se inscribe: queda en
+      // REVISION_MANUAL (con todos los datos guardados) para que el admin revise.
+      if (estadoReal === 'Approved') {
+        const esperadoCents = Math.round(parseFloat(String(paymentAttempt.amount)) * 100);
+        const txRespuesta = confirmacionData.clientTransactionId;
+        const montoRespuesta = Number(confirmacionData.amount);
+        const txNoCoincide = txRespuesta != null && String(txRespuesta) !== clientTransactionId;
+        const montoNoCoincide = Number.isFinite(montoRespuesta) && montoRespuesta !== esperadoCents;
+        if (txNoCoincide || montoNoCoincide) {
+          this.logger.error(
+            `🚨 PAGO APROBADO NO COINCIDE - ClientTxId: ${clientTransactionId} - ` +
+              `Tx respuesta: ${txRespuesta} - Monto respuesta: ${montoRespuesta} - Esperado: ${esperadoCents} ` +
+              `- Usuario: ${userEmail} - Curso: ${courseName}. Requiere revisión manual.`,
+          );
+          estadoReal = 'REVISION_MANUAL';
+        }
+      }
 
       this.logger.log(
         `📊 Estado Payphone: ${estadoReal} - Usuario: ${userEmail} - Curso: ${courseName}`,
@@ -628,6 +655,19 @@ export class PaymentsController {
         userId,
         req.user,
       );
+
+      // SEGURIDAD: este endpoint solo vale para cursos gratuitos. Antes no se
+      // comprobaba y cualquier estudiante podía inscribirse (pagado: true) en
+      // un curso de pago enviando su cursoId. Los cursos de pago entran solo por
+      // Payphone o por un cupón GRATIS (create-payphone-payment-with-coupon).
+      const esGratis =
+        String(course.tipo || '').endsWith('_GRATIS') || Number(course.precio) === 0;
+      if (!esGratis) {
+        this.logger.warn(
+          `🚫 Intento de inscripción gratuita en curso de pago - Usuario ID: ${userId} - Curso: ${course.id}`,
+        );
+        throw new BadRequestException('Este curso es de pago. Completa el pago para inscribirte.');
+      }
 
       // ✅ LOG INFORMATIVO DETALLADO
       this.logger.log(`🎓 INSCRIPCIÓN GRATUITA INICIADA:`);

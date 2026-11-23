@@ -2,7 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { seedAdminUser } from './common/seed-admin';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
+import { join, extname } from 'path';
+import { INLINE_UPLOAD_EXTENSIONS } from './common/upload.util';
 import { ValidationPipe, BadRequestException, Logger } from '@nestjs/common';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -56,6 +57,18 @@ async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger: winstonLogger,
     });
+
+    // En producción el backend está detrás de nginx: sin 'trust proxy', req.ip es
+    // la IP del contenedor nginx para TODOS los usuarios, y los rate limiters
+    // (login 30/15min, registro, recuperación) se compartían entre toda la
+    // plataforma. Con 1 salto, req.ip es la IP que vio nginx ($remote_addr);
+    // el cliente no puede falsificarla porque nginx agrega su propio valor.
+    // Ajustable con TRUST_PROXY (número de proxies delante del backend).
+    const trustProxy = Number(process.env.TRUST_PROXY ?? (process.env.NODE_ENV === 'production' ? 1 : 0));
+    if (trustProxy > 0) {
+      app.set('trust proxy', trustProxy);
+      logger.log(`🔁 trust proxy = ${trustProxy}`);
+    }
 
     // ✅ CORS Configurado DINÁMICAMENTE desde variables de entorno
     const allowedOrigins: string[] = [];
@@ -209,8 +222,19 @@ async function bootstrap() {
     }
 
     // Servir carpeta uploads para imágenes
+    // SEGURIDAD: /uploads solo muestra en línea imágenes. Cualquier otro tipo
+    // (html, js, svg, archivos antiguos...) se fuerza a descarga y con CSP
+    // sandbox, para que nunca pueda ejecutarse como página de este dominio.
     app.useStaticAssets(join(__dirname, '..', 'uploads'), {
       prefix: '/uploads/',
+      dotfiles: 'deny',
+      setHeaders: (res, filePath) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (!INLINE_UPLOAD_EXTENSIONS.includes(extname(filePath).toLowerCase())) {
+          res.setHeader('Content-Disposition', 'attachment');
+          res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+        }
+      },
     });
     logger.log('📁 Serviendo archivos multimedia desde /uploads');
 
