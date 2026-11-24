@@ -19,6 +19,12 @@ interface QueuedMail {
   resolve: () => void;
   reject: (e: Error) => void;
   attempts: number;
+  /** Correos de cuenta (activación, contraseña): pasan delante de los masivos. */
+  priority?: boolean;
+}
+
+export interface SendMailOptions {
+  priority?: boolean;
 }
 
 /**
@@ -80,6 +86,10 @@ export class MailService implements OnModuleInit {
       requireTLS: !cfg.secure,       // fuerza STARTTLS cuando no es TLS implícito
       auth: { user: cfg.user, pass: cfg.pass },
       tls: { rejectUnauthorized: false, servername: cfg.host },
+      // Nombre con el que nos presentamos (EHLO). Por defecto sería el hostname
+      // del contenedor Docker (p. ej. "3f9a1c2b7d4e"), que queda en las cabeceras
+      // "Received" y los filtros antispam lo penalizan.
+      name: this.ehloName(cfg.user),
       // ── Pool reutilizado: clave anti-baneo ──
       pool: true,
       maxConnections: 1,
@@ -90,6 +100,42 @@ export class MailService implements OnModuleInit {
       greetingTimeout: 30_000,
       socketTimeout: 60_000,
     });
+  }
+
+  /** Dominio del remitente (cursos@maat.ec → "maat.ec") para el saludo EHLO. */
+  private ehloName(user?: string): string | undefined {
+    const dominio = (user || '').split('@')[1]?.trim().toLowerCase();
+    return dominio && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(dominio) ? dominio : undefined;
+  }
+
+  /**
+   * Versión en texto plano del HTML. Un correo SOLO-HTML (sin parte de texto)
+   * es una señal típica de spam; enviar ambas versiones mejora la entrega.
+   */
+  static htmlToText(html: string): string {
+    return (html || '')
+      .replace(/<(style|script|head)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href, txt) => {
+        const t = txt.replace(/<[^>]+>/g, '').trim();
+        return t && t !== href ? `${t}: ${href}` : href;
+      })
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '• ')
+      .replace(/<hr[^>]*>/gi, '\n----------\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&middot;/gi, '·')
+      .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/[ \t]+/g, ' ')
+      .replace(/ *\n */g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   private getTransporter(): Transporter {
@@ -128,15 +174,38 @@ export class MailService implements OnModuleInit {
     subject: string,
     html: string,
     attachments?: MailAttachment[],
+    opts: SendMailOptions = {},
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.queue.push({ to, subject, html, attachments, resolve, reject, attempts: 0 });
+      this.enqueue({
+        to, subject, html, attachments, resolve, reject, attempts: 0, priority: !!opts.priority,
+      });
       void this.processQueue();
     });
   }
 
+  /**
+   * Inserta en la cola. Los prioritarios van detrás de los demás prioritarios
+   * pero DELANTE de los masivos (avisos de curso, material, etc.), así un correo
+   * de activación no espera a que terminen cientos de notificaciones. Las pausas
+   * anti-baneo entre mensajes se siguen respetando igual.
+   */
+  private enqueue(item: QueuedMail) {
+    if (!item.priority) {
+      this.queue.push(item);
+      return;
+    }
+    const firstNormal = this.queue.findIndex((q) => !q.priority);
+    if (firstNormal === -1) this.queue.push(item);
+    else this.queue.splice(firstNormal, 0, item);
+  }
+
   getQueueStatus() {
-    return { queueLength: this.queue.length, working: this.working };
+    return {
+      queueLength: this.queue.length,
+      priorityPending: this.queue.filter((q) => q.priority).length,
+      working: this.working,
+    };
   }
 
   private sleep(ms: number) {
@@ -162,7 +231,7 @@ export class MailService implements OnModuleInit {
             this.logger.warn(`⚠️  Reintento ${item.attempts}/3 para ${item.to}: ${e.message}`);
             this.resetTransporter();
             await this.sleep(5000 * item.attempts);
-            this.queue.push(item); // al final de la cola
+            this.enqueue(item); // al final (o al final de los prioritarios)
           } else {
             this.logger.error(`❌ No se pudo enviar a ${item.to} tras 3 intentos: ${e.message}`);
             item.reject(new Error(`Fallo al enviar correo a ${item.to}: ${e.message}`));
@@ -204,11 +273,8 @@ export class MailService implements OnModuleInit {
       to,
       subject,
       html,
+      text: MailService.htmlToText(html),
       attachments,
-      headers: {
-        'X-Priority': '3',
-        Importance: 'normal',
-      },
     });
     this.logger.log(`✅ Correo enviado a ${to} en ${Date.now() - t0}ms`);
   }
@@ -314,6 +380,7 @@ export class MailService implements OnModuleInit {
       requireTLS: !secure,
       auth: { user, pass },
       tls: { rejectUnauthorized: false, servername: host },
+      name: this.ehloName(user),
       connectionTimeout: 30_000,
       greetingTimeout: 30_000,
       socketTimeout: 35_000,
@@ -372,25 +439,38 @@ export class MailService implements OnModuleInit {
   //  Plantillas existentes (sin cambios de firma)
   // ───────────────────────────────────────────────────────────────────────────
   async sendVerificationEmail(email: string, token: string, nombre: string) {
-    const verificationUrl = `${this.settings.get('frontend_url')}/verify-email?token=${token}`;
+    const base = (this.settings.get('frontend_url') || '').replace(/\/+$/, '');
+    const verificationUrl = `${base}/verify-email?token=${encodeURIComponent(token)}`;
+    const esc = (s: string) =>
+      String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+    let sitio = base;
+    try { sitio = new URL(base).host; } catch { /* usa base tal cual */ }
 
+    // Plantilla sobria (pocas imágenes/emojis, texto explicativo, un solo
+    // enlace a nuestro propio dominio): los filtros antispam desconfían de los
+    // correos que son solo un botón.
     const html = `
-<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-  <h2 style="color:#2563eb;margin-bottom:20px">Activa tu cuenta - Cursos MAAT</h2>
-  <p>Hola <strong>${nombre}</strong>,</p>
-  <p>Para activar tu cuenta, haz clic en el botón:</p>
-  <div style="text-align:center;margin:25px 0">
-    <a href="${verificationUrl}"
-       style="background:#2563eb;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold">
-      Activar Cuenta
-    </a>
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Confirma tu correo</title></head>
+<body style="margin:0;padding:0;background:#f4f6fb">
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
+  <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:28px">
+    <p style="margin:0 0 6px;font-size:13px;color:#6b7280">MAAT Academy &middot; Cursos</p>
+    <h1 style="margin:0 0 18px;font-size:20px;color:#111827">Confirma tu correo electrónico</h1>
+    <p style="margin:0 0 12px;line-height:1.55">Hola ${esc(nombre)},</p>
+    <p style="margin:0 0 12px;line-height:1.55">Gracias por registrarte en la plataforma de cursos de MAAT Academy. Para terminar de crear tu cuenta, confirma que esta dirección de correo es tuya:</p>
+    <p style="text-align:center;margin:24px 0">
+      <a href="${verificationUrl}" style="background:#1d4ed8;color:#ffffff;padding:12px 28px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold">Confirmar mi correo</a>
+    </p>
+    <p style="margin:0 0 12px;line-height:1.55;font-size:14px;color:#4b5563">Si el botón no funciona, copia y pega este enlace en tu navegador:<br><span style="word-break:break-all;color:#1d4ed8">${verificationUrl}</span></p>
+    <p style="margin:0;line-height:1.55;font-size:14px;color:#4b5563">El enlace es válido durante 24 horas. Si caduca, puedes pedir uno nuevo desde la pantalla de inicio de sesión.</p>
   </div>
-  <p style="color:#6b7280;font-size:14px">Si el botón no funciona, copia este enlace:<br>${verificationUrl}</p>
-  <hr style="margin:25px 0">
-  <p style="color:#9ca3af;font-size:12px">Cursos MAAT</p>
-</div>`.trim();
+  <p style="margin:16px 4px 0;font-size:12px;line-height:1.5;color:#6b7280">Recibes este mensaje porque se creó una cuenta con esta dirección en ${esc(sitio)}. Si no fuiste tú, ignora este correo: la cuenta no se activará.</p>
+  <p style="margin:6px 4px 0;font-size:12px;color:#6b7280">MAAT Academy</p>
+</div>
+</body></html>`.trim();
 
-    await this.sendMail(email, 'Activa tu cuenta - Cursos MAAT', html);
+    await this.sendMail(email, 'Confirma tu correo - MAAT Academy', html, undefined, { priority: true });
   }
 
   async sendDiploma(

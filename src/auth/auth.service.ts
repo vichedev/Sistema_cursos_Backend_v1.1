@@ -476,6 +476,8 @@ export class AuthService {
           <small>Sistema de Cursos MAAT</small>
         </div>
         `,
+        undefined,
+        { priority: true }, // correo de cuenta: delante de los masivos
       );
       this.logger.log(`📧 Notificación enviada a ${user.correo}`);
     } catch (emailError) {
@@ -585,6 +587,8 @@ export class AuthService {
   <hr style="margin:25px 0">
   <p style="color:#9ca3af;font-size:12px">Cursos MAAT</p>
 </div>`.trim(),
+      undefined,
+      { priority: true }, // correo de cuenta: delante de los masivos
     );
 
     this.logger.log(`📧 Correo de recuperación enviado a ${user.correo}`);
@@ -632,6 +636,8 @@ export class AuthService {
   <hr style="margin:25px 0">
   <p style="color:#9ca3af;font-size:12px">Cursos MAAT</p>
 </div>`.trim(),
+        undefined,
+        { priority: true }, // correo de cuenta: delante de los masivos
       );
     } catch (emailError) {
       this.logger.error(`❌ Error enviando confirmación a ${user.correo}:`, emailError.message);
